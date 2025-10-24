@@ -1,0 +1,62 @@
+name: Render and Publish Skins Page
+
+on:
+  # Schedule to run at 13:00 UTC (7:00 AM CST / 8:00 AM CDT)
+  # GitHub Actions cron does not adjust for DST.
+  # 13:00 UTC is 7:00 AM CST (winter)
+  # 13:00 UTC is 8:00 AM CDT (summer)
+  # If you want it at 7:00 AM CDT (summer), you would use '12:00'.
+  # 13:00 is a good compromise.
+  schedule:
+    - cron: '0 13 * * *'
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# Set permissions for the job
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Install system libraries required by rvest/xml2
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libxml2-dev libssl-dev
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'latest'
+
+      - name: Set up Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      # Install R packages
+      - name: Install R Dependencies
+        run: |
+          R -e "install.packages('pacman', dependencies = TRUE)"
+          R -e "pacman::p_load(rvest, httr, dplyr, tidyr, stringr, lubridate, tibble, knitr, kableExtra)"
+
+      # Render the document
+      - name: Render Quarto Document
+        run: |
+          quarto render skins_today.qmd --to html --output-dir _site --output index.html
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './_site'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
