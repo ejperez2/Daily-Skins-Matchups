@@ -17,7 +17,7 @@ on:
 
 # Set permissions for the job
 permissions:
-  contents: write  # Changed from 'read' to 'write' to commit history
+  contents: write # Changed from 'read' to 'write' to commit history
   pages: write
   id-token: write
 
@@ -28,7 +28,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch all history for proper commits
+          fetch-depth: 0 # Fetch all history for proper commits
       
       # Install system libraries required by rvest/xml2
       - name: Install system dependencies
@@ -63,7 +63,7 @@ jobs:
         run: |
           mkdir -p skins_history
       
-      # Render the document (update filename to match your new file)
+      # Render the document
       - name: Render Quarto Document
         run: |
           quarto render skins_today.qmd --to html --output-dir _site --output index.html
@@ -76,7 +76,7 @@ jobs:
           git add skins_history/*.csv
           git diff --staged --quiet || git commit -m "Update skins history - $(date +'%Y-%m-%d')"
           git push
-        continue-on-error: true  # Don't fail if there are no changes to commit
+        continue-on-error: true # Don't fail if there are no changes to commit
       
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
