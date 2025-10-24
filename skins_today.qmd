@@ -53,36 +53,36 @@ game_data <- html_content %>% html_element("table") %>% html_table()
 # --- Part 2: Define Skins Picks ---
 draft_data <- tribble(
   ~Team, ~Matchup_Key, ~abbr, ~skins_pick, ~player,
-  "Utah Jazz", "Jazz", "UTA", "L", "Eristeo",
-  "Oklahoma City Thunder", "Thunder", "OKC", "W", "Matt",
-  "Washington Wizards", "Wizards", "WAS", "L", "Brian",
-  "Brooklyn Nets", "Nets", "BKN", "L", "Adam",
-  "Cleveland Cavaliers", "Cavaliers", "CLE", "W", "Thomas",
-  "Charlotte Hornets", "Hornets", "CHA", "L", "Brian",
-  "Denver Nuggets", "Nuggets", "DEN", "W", "Thomas",
-  "New York Knicks", "Knicks", "NYK", "W", "Adam",
-  "Houston Rockets", "Rockets", "HOU", "W", "Kenneth",
-  "Phoenix Suns", "Suns", "PHX", "L", "Eristeo",
-  "New Orleans Pelicans", "Pelicans", "NOP", "L", "Matt",
-  "Orlando Magic", "Magic", "ORL", "W", "Kenneth",
-  "Chicago Bulls", "Bulls", "CHI", "L", "Thomas",
-  "Los Angeles Clippers", "Clippers", "LAC", "W", "Eristeo",
-  "Minnesota Timberwolves", "Timberwolves", "MIN", "W", "Matt",
-  "Portland Trail Blazers", "Trail Blazers", "POR", "L", "Kenneth",
-  "Atlanta Hawks", "Hawks", "ATL", "W", "Adam",
-  "Los Angeles Lakers", "Lakers", "LAL", "W", "Adam",
-  "Golden State Warriors", "Warriors", "GSW", "W", "Kenneth",
-  "Sacramento Kings", "Kings", "SAC", "L", "Thomas",
-  "Detroit Pistons", "Pistons", "DET", "W", "Brian",
-  "Indiana Pacers", "Pacers", "IND", "L", "Eristeo",
-  "Miami Heat", "Heat", "MIA", "L", "Matt",
-  "Philadelphia 76ers", "76ers", "PHI", "W", "Matt",
-  "Toronto Raptors", "Raptors", "TOR", "L", "Brian",
-  "Milwaukee Bucks", "Bucks", "MIL", "W", "Brian",
-  "San Antonio Spurs", "Spurs", "SAS", "W", "Eristeo",
-  "Memphis Grizzlies", "Grizzlies", "MEM", "W", "Kenneth",
-  "Boston Celtics", "Celtics", "BOS", "W", "Adam",
-  "Dallas Mavericks", "Mavericks", "DAL", "W", "Thomas"
+  "Utah Jazz", "Jazz|Utah", "UTA", "L", "Eristeo",
+  "Oklahoma City Thunder", "Thunder|Oklahoma", "OKC", "W", "Matt",
+  "Washington Wizards", "Wizards|Washington", "WSH", "L", "Brian",
+  "Brooklyn Nets", "Nets|Brooklyn", "BKN", "L", "Adam",
+  "Cleveland Cavaliers", "Cavaliers|Cleveland", "CLE", "W", "Thomas",
+  "Charlotte Hornets", "Hornets|Charlotte", "CHA", "L", "Brian",
+  "Denver Nuggets", "Nuggets|Denver", "DEN", "W", "Thomas",
+  "New York Knicks", "Knicks|New York", "NY", "W", "Adam",
+  "Houston Rockets", "Rockets|Houston", "HOU", "W", "Kenneth",
+  "Phoenix Suns", "Suns|Phoenix", "PHX", "L", "Eristeo",
+  "New Orleans Pelicans", "Pelicans|New Orleans", "NO", "L", "Matt",
+  "Orlando Magic", "Magic|Orlando", "ORL", "W", "Kenneth",
+  "Chicago Bulls", "Bulls|Chicago", "CHI", "L", "Thomas",
+  "Los Angeles Clippers", "Clippers|LA Clippers", "LAC", "W", "Eristeo",
+  "Minnesota Timberwolves", "Timberwolves|Minnesota", "MIN", "W", "Matt",
+  "Portland Trail Blazers", "Trail Blazers|Portland", "POR", "L", "Kenneth",
+  "Atlanta Hawks", "Hawks|Atlanta", "ATL", "W", "Adam",
+  "Los Angeles Lakers", "Lakers|LA Lakers", "LAL", "W", "Adam",
+  "Golden State Warriors", "Warriors|Golden State", "GS", "W", "Kenneth",
+  "Sacramento Kings", "Kings|Sacramento", "SAC", "L", "Thomas",
+  "Detroit Pistons", "Pistons|Detroit", "DET", "W", "Brian",
+  "Indiana Pacers", "Pacers|Indiana", "IND", "L", "Eristeo",
+  "Miami Heat", "Heat|Miami", "MIA", "L", "Matt",
+  "Philadelphia 76ers", "76ers|Philadelphia", "PHI", "W", "Matt",
+  "Toronto Raptors", "Raptors|Toronto", "TOR", "L", "Brian",
+  "Milwaukee Bucks", "Bucks|Milwaukee", "MIL", "W", "Brian",
+  "San Antonio Spurs", "Spurs|San Antonio", "SAS", "W", "Eristeo",
+  "Memphis Grizzlies", "Grizzlies|Memphis", "MEM", "W", "Kenneth",
+  "Boston Celtics", "Celtics|Boston", "BOS", "W", "Adam",
+  "Dallas Mavericks", "Mavericks|Dallas", "DAL", "W", "Thomas"
 )
 
 # --- Part 3: Calculate Expected Skins ---
@@ -102,10 +102,20 @@ current_year <- year(today_ct)
 match_team <- function(matchup_str, draft_data) {
   matchup_upper <- str_to_upper(matchup_str)
   for (i in 1:nrow(draft_data)) {
-    key_upper <- str_to_upper(draft_data$Matchup_Key[i])
+    # Split the Matchup_Key by pipe to get alternatives
+    keys <- str_split(draft_data$Matchup_Key[i], "\\|")[[1]]
+    keys_upper <- str_to_upper(keys)
     team_upper <- str_to_upper(draft_data$Team[i])
-    if (str_detect(matchup_upper, fixed(key_upper)) || 
-        str_detect(matchup_upper, fixed(team_upper))) {
+    
+    # Check if any of the keys match
+    for (key in keys_upper) {
+      if (str_detect(matchup_upper, fixed(key))) {
+        return(draft_data$Matchup_Key[i])
+      }
+    }
+    
+    # Also check full team name
+    if (str_detect(matchup_upper, fixed(team_upper))) {
       return(draft_data$Matchup_Key[i])
     }
   }
@@ -119,12 +129,12 @@ todays_picks <- game_data_cleaned %>%
     game_time_str = str_extract(Matchup, "(?:Oct|Nov|Dec|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep) \\d+, \\d+:\\d+[AP]M UTC")
   ) %>%
   fill(game_time_str, .direction = "up") %>%
-  filter(str_detect(consensus, "Open:")) %>%
+  filter(str_detect(consensus, "(Current|Open):")) %>%
   mutate(
     Matchup_Key = sapply(Matchup, match_team, draft_data = draft_data),
     game_time_str_with_year = paste(game_time_str, current_year),
     game_time_utc = parse_date_time(
-      game_time_str_with_year, 
+      str_remove(game_time_str_with_year, " UTC"),
       orders = c("b d, I:M p Y"),
       tz = "UTC"
     ),
@@ -134,7 +144,11 @@ todays_picks <- game_data_cleaned %>%
   filter(game_date_ct == today_ct) %>%
   filter(!is.na(Matchup_Key)) %>%
   mutate(
-    moneyline = as.numeric(str_extract(consensus, "(?<=Open: )[+-]?\\d+"))
+    # Prefer Current odds over Open odds
+    current_odds_str = str_extract(consensus, "Current:\\s*[+-]?\\d+"),
+    open_odds_str = str_extract(consensus, "Open:\\s*[+-]?\\d+"),
+    odds_to_use = if_else(!is.na(current_odds_str), current_odds_str, open_odds_str),
+    moneyline = as.numeric(str_extract(odds_to_use, "[+-]?\\d+"))
   ) %>%
   mutate(implied_prob = convert_odds_to_prob(moneyline)) %>%
   group_by(game_time_ct) %>%
@@ -194,9 +208,19 @@ if (nrow(todays_picks) > 0) {
 if (nrow(todays_picks) > 0) {
   zero_sum_games <- todays_picks %>%
     group_by(game_time_ct) %>%
-    filter(n() == 2, all(Pick == "W"), n_distinct(Player) == 2) %>%
-    mutate(matchup_str = paste0(Abbr, " (", Player, ")")) %>%
-    summarise(`Zero-Sum Matchup` = paste(matchup_str, collapse = " vs. "), .groups = 'drop')
+    filter(
+      n() == 2, # Exactly 2 teams in the game
+      (all(Pick == "W") | all(Pick == "L")) # Both W or both L (creates zero-sum)
+    ) %>%
+    mutate(
+      matchup_type = if_else(all(Pick == "W"), "Both W", "Both L"),
+      matchup_str = paste0(Abbr, " (", Player, ")")
+    ) %>%
+    summarise(
+      `Zero-Sum Matchup` = paste(matchup_str, collapse = " vs. "),
+      Type = first(matchup_type),
+      .groups = 'drop'
+    )
   
   if (nrow(zero_sum_games) > 0) {
     knitr::kable(select(zero_sum_games, -game_time_ct), caption = "Today's Zero-Sum Matchups") %>%
@@ -314,8 +338,8 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
     group_by(Player) %>%
     summarise(
       `Total Expected Skins` = sum(`Expected Skins`, na.rm = TRUE),
-      `Total Actual Skins`   = sum(Actual_Skins, na.rm = TRUE),
-      `Skins Luck`           = sum(Skins_Luck, na.rm = TRUE),
+      `Total Actual Skins` = sum(Actual_Skins, na.rm = TRUE),
+      `Skins Luck` = sum(Skins_Luck, na.rm = TRUE),
       .groups = 'drop'
     ) %>%
     arrange(desc(`Skins Luck`))
@@ -377,8 +401,8 @@ if (file.exists(yesterday_file)) {
       group_by(Player) %>%
       summarise(
         Total_Expected_Skins = sum(Expected_Skins, na.rm = TRUE),
-        Total_Actual_Skins   = sum(Actual_Skins, na.rm = TRUE),
-        Skins_Luck_Total     = sum(Skins_Luck, na.rm = TRUE),
+        Total_Actual_Skins = sum(Actual_Skins, na.rm = TRUE),
+        Skins_Luck_Total = sum(Skins_Luck, na.rm = TRUE),
         .groups = 'drop'
       ) %>%
       rename(
@@ -431,7 +455,7 @@ if (length(all_files) > 0) {
       summarise(
         Games = n(),
         Total_Expected_Skins = sum(Expected_Skins, na.rm = TRUE),
-        Total_Actual_Skins   = sum(Actual_Skins, na.rm = TRUE),
+        Total_Actual_Skins = sum(Actual_Skins, na.rm = TRUE),
         Cumulative_Skins_Luck = sum(Skins_Luck, na.rm = TRUE),
         .groups = 'drop'
       ) %>%
