@@ -72,10 +72,10 @@ draft_data <- tribble(
   "Cleveland Cavaliers", "Cavaliers|Cleveland", "CLE", "W", "Thomas",
   "Charlotte Hornets", "Hornets|Charlotte", "CHA", "L", "Brian",
   "Denver Nuggets", "Nuggets|Denver", "DEN", "W", "Thomas",
-  "New York Knicks", "Knicks|New York", "NY", "W", "Adam",
+  "New York Knicks", "Knicks|New York", "NYK", "W", "Adam",
   "Houston Rockets", "Rockets|Houston", "HOU", "W", "Kenneth",
   "Phoenix Suns", "Suns|Phoenix", "PHX", "L", "Eristeo",
-  "New Orleans Pelicans", "Pelicans|New Orleans", "NO", "L", "Matt",
+  "New Orleans Pelicans", "Pelicans|New Orleans", "NOP", "L", "Matt",
   "Orlando Magic", "Magic|Orlando", "ORL", "W", "Kenneth",
   "Chicago Bulls", "Bulls|Chicago", "CHI", "L", "Thomas",
   "Los Angeles Clippers", "Clippers|LA Clippers", "LAC", "W", "Eristeo",
@@ -83,7 +83,7 @@ draft_data <- tribble(
   "Portland Trail Blazers", "Trail Blazers|Portland", "POR", "L", "Kenneth",
   "Atlanta Hawks", "Hawks|Atlanta", "ATL", "W", "Adam",
   "Los Angeles Lakers", "Lakers|LA Lakers", "LAL", "W", "Adam",
-  "Golden State Warriors", "Warriors|Golden State", "GS", "W", "Kenneth",
+  "Golden State Warriors", "Warriors|Golden State", "GSW", "W", "Kenneth",
   "Sacramento Kings", "Kings|Sacramento", "SAC", "L", "Thomas",
   "Detroit Pistons", "Pistons|Detroit", "DET", "W", "Brian",
   "Indiana Pacers", "Pacers|Indiana", "IND", "L", "Eristeo",
@@ -182,31 +182,42 @@ todays_picks <- game_data %>%
   arrange(desc(`Expected Skins`))
 ```
 
-```{r expected_team_table}
-#| echo: false
-
-# Print Table 1: Today's Expected Skins by Team
-if (nrow(todays_picks) > 0) {
-  knitr::kable(
-    select(todays_picks, -game_id, -Abbr, -Date), 
-    digits = 3, 
-    caption = "Today's Expected Skins by Team"
-  ) %>%
-    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(3, bold = TRUE)
-} else {
-  cat("<p style='color:#666;'>No games scheduled for today.</p>")
-}
-```
-
 ```{r expected_player_table}
 #| echo: false
 
-# Print Table 2: Total Expected Skins by Player
+# Print Table 1: Total Expected Skins by Player
 if (nrow(todays_picks) > 0) {
+  
+  # First, identify self zero-sum matchups (same player has both teams AND both picks are the same)
+  self_zero_sum <- todays_picks %>%
+    group_by(game_id) %>%
+    filter(n() == 2) %>%
+    summarise(
+      players = list(Player),
+      picks = list(Pick),
+      is_self_zero_sum = length(unique(Player)) == 1 & length(unique(Pick)) == 1,
+      player = first(Player),
+      .groups = 'drop'
+    ) %>%
+    filter(is_self_zero_sum) %>%
+    group_by(player) %>%
+    summarise(self_zero_sum_count = n(), .groups = 'drop')
+  
+  # Create player summary
   player_summary <- todays_picks %>%
     group_by(Player) %>%
-    summarise(`Total Expected Skins` = sum(`Expected Skins`, na.rm = TRUE), .groups = 'drop') %>%
+    summarise(
+      `Total Games` = n(),
+      `Total Expected Skins` = sum(`Expected Skins`, na.rm = TRUE),
+      .groups = 'drop'
+    ) %>%
+    left_join(self_zero_sum, by = c("Player" = "player")) %>%
+    mutate(
+      self_zero_sum_count = ifelse(is.na(self_zero_sum_count), 0, self_zero_sum_count),
+      `Max Skins` = `Total Games` - self_zero_sum_count,
+      `Expected Skins %` = `Total Expected Skins` / `Total Games`
+    ) %>%
+    select(Player, `Total Games`, `Total Expected Skins`, `Expected Skins %`, `Max Skins`) %>%
     arrange(desc(`Total Expected Skins`))
   
   knitr::kable(player_summary, digits = 3, caption = "Total Expected Skins by Player") %>%
@@ -217,7 +228,7 @@ if (nrow(todays_picks) > 0) {
 ```{r zero_sum_table}
 #| echo: false
 
-# Print Table 3: Zero-Sum Matchups
+# Print Table 2: Zero-Sum Matchups
 if (nrow(todays_picks) > 0) {
   zero_sum_games <- todays_picks %>%
     group_by(game_id) %>%
@@ -246,6 +257,23 @@ if (nrow(todays_picks) > 0) {
 }
 ```
 
+```{r expected_team_table}
+#| echo: false
+
+# Print Table 3: Today's Expected Skins by Team
+if (nrow(todays_picks) > 0) {
+  knitr::kable(
+    select(todays_picks, -game_id, -Abbr, -Date), 
+    digits = 3, 
+    caption = "Today's Expected Skins by Team"
+  ) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+    column_spec(3, bold = TRUE)
+} else {
+  cat("<p style='color:#666;'>No games scheduled for today.</p>")
+}
+```
+
 ---
 
 ## Today's Results & Skins Luck
@@ -260,18 +288,48 @@ This section scrapes `cleaningtheglass.com` for game results. Games that are fin
 # Only process results if we have games today
 if (nrow(todays_picks) > 0) {
   
-  # 1. Scrape the Live Game Data
-  url_scores <- "https://cleaningtheglass.com/stats/games/"
+  # 1. Scrape the Live Game Data with date parameter
+  url_scores <- paste0("https://cleaningtheglass.com/stats/games/?date=", today_ct)
   page_scores <- read_html(url_scores)
-  scores_table <- page_scores %>%
-    html_element("table") %>%
-    html_table()
   
-  # 2. Clean and Reshape the Scraped 'scores_table'
-  game_results_wide <- scores_table %>%
-    select(Abbr = 2, PTS_Str = 3) %>%
-    mutate(PTS = suppressWarnings(as.numeric(PTS_Str))) %>%
-    filter(!is.na(PTS)) %>%
+  # 2. Get all tables (each table contains one game)
+  all_tables <- page_scores %>% html_elements("table")
+  
+  # 3. Extract scores from all tables and track game status
+  all_game_results <- data.frame()
+  
+  for (i in 1:length(all_tables)) {
+    table_data <- all_tables[[i]] %>% html_table()
+    
+    # Check game status from row 3 (status row)
+    # "Final" = completed, "Live" = in-progress, "Game Preview" = unstarted
+    is_final <- FALSE
+    if (nrow(table_data) >= 3) {
+      status_row <- paste(unlist(table_data[3, ]), collapse = " ")
+      is_final <- grepl("Final", status_row, ignore.case = TRUE)
+    }
+    
+    # Try to extract game scores (team abbr in col 2, points in col 3)
+    if (ncol(table_data) >= 3) {
+      game_scores <- table_data %>%
+        select(Abbr = 2, PTS_Str = 3) %>%
+        mutate(
+          Abbr = as.character(Abbr),
+          PTS = suppressWarnings(as.numeric(as.character(PTS_Str)))
+        ) %>%
+        filter(!is.na(PTS), PTS > 0) %>%
+        select(Abbr, PTS) %>%
+        mutate(is_final = is_final)
+      
+      if (nrow(game_scores) > 0) {
+        all_game_results <- bind_rows(all_game_results, game_scores)
+      }
+    }
+  }
+  
+  # 4. Clean and Reshape the game results - ONLY INCLUDE FINAL GAMES
+  game_results_wide <- all_game_results %>%
+    filter(is_final == TRUE) %>%
     mutate(Game_ID = ceiling(row_number() / 2)) %>%
     group_by(Game_ID) %>%
     mutate(Team_Num = row_number()) %>%
@@ -282,19 +340,23 @@ if (nrow(todays_picks) > 0) {
       values_from = c(Abbr, PTS)
     )
   
-  # 3. Create a final 'Won_Game' lookup table
-  team_1_results <- game_results_wide %>%
-    select(Abbr = Abbr_1, PTS = PTS_1, Opp_PTS = PTS_2) %>%
-    mutate(Won_Game = PTS > Opp_PTS)
+  # 5. Create a final 'Won_Game' lookup table
+  final_team_results <- data.frame(Abbr = character(), Won_Game = logical())
   
-  team_2_results <- game_results_wide %>%
-    select(Abbr = Abbr_2, PTS = PTS_2, Opp_PTS = PTS_1) %>%
-    mutate(Won_Game = PTS > Opp_PTS)
+  if (nrow(game_results_wide) > 0) {
+    team_1_results <- game_results_wide %>%
+      select(Abbr = Abbr_1, PTS = PTS_1, Opp_PTS = PTS_2) %>%
+      mutate(Won_Game = PTS > Opp_PTS)
+    
+    team_2_results <- game_results_wide %>%
+      select(Abbr = Abbr_2, PTS = PTS_2, Opp_PTS = PTS_1) %>%
+      mutate(Won_Game = PTS > Opp_PTS)
+    
+    final_team_results <- bind_rows(team_1_results, team_2_results) %>%
+      select(Abbr, Won_Game)
+  }
   
-  final_team_results <- bind_rows(team_1_results, team_2_results) %>%
-    select(Abbr, Won_Game)
-  
-  # 4. Create todays_results with actual outcomes
+  # 6. Create todays_results with actual outcomes
   todays_results <- todays_picks %>%
     left_join(final_team_results, by = "Abbr") %>%
     mutate(
@@ -307,13 +369,13 @@ if (nrow(todays_picks) > 0) {
       Skins_Luck = Actual_Skins - `Expected Skins`
     )
   
-  # 5. Save today's results to file (use underscores for easier CSV handling)
+  # 7. Save today's results to file (use underscores for easier CSV handling)
   today_file <- file.path(history_dir, paste0(today_ct, ".csv"))
   todays_results %>%
     select(Date, Player, Team, Abbr, Pick, Expected_Skins = `Expected Skins`, Won_Game, Actual_Skins, Skins_Luck) %>%
     write_csv(today_file)
   
-  # 6. Print Table 4: Completed Games Summary
+  # 8. Print Table 4: Completed Games Summary
   completed_games_table <- todays_results %>%
     filter(!is.na(Won_Game)) %>%
     select(
