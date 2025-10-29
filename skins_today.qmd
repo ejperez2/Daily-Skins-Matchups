@@ -67,7 +67,7 @@ draft_data <- tribble(
   ~Team, ~Matchup_Key, ~abbr, ~skins_pick, ~player,
   "Utah Jazz", "Jazz|Utah", "UTA", "L", "Eristeo",
   "Oklahoma City Thunder", "Thunder|Oklahoma", "OKC", "W", "Matt",
-  "Washington Wizards", "Wizards|Washington", "WSH", "L", "Brian",
+  "Washington Wizards", "Wizards|Washington", "WAS", "L", "Brian",
   "Brooklyn Nets", "Nets|Brooklyn", "BKN", "L", "Adam",
   "Cleveland Cavaliers", "Cavaliers|Cleveland", "CLE", "W", "Thomas",
   "Charlotte Hornets", "Hornets|Charlotte", "CHA", "L", "Brian",
