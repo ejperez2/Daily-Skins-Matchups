@@ -43,12 +43,24 @@ This page shows the expected skins for today's NBA games, based on live odds.
 #| warning: false
 
 # --- Part 1: Scrape Expected Odds ---
-url <- "https://www.sportsline.com/nba/odds/money-line/"
+url <- paste0("https://www.sportsline.com/nba/odds/money-line/",
+              "?t=", format(Sys.time(), "%Y%m%d%H%M%S"))
 googlebot_ua <- "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
 
 page_session <- rvest::session(url, httr::user_agent(googlebot_ua))
 html_content <- rvest::read_html(page_session)
-game_data <- html_content %>% html_element("table") %>% html_table()
+game_data_raw <- html_content %>% html_element("table") %>% html_table()
+
+# Extract correct columns and clean team names
+game_data <- data.frame(
+  Matchup_raw = game_data_raw[[1]],
+  consensus = game_data_raw[[3]],
+  stringsAsFactors = FALSE
+) %>%
+  mutate(
+    # Remove the record (e.g., "2-1") from team names
+    Matchup = str_remove(Matchup_raw, "\\d+-\\d+$")
+  )
 
 # --- Part 2: Define Skins Picks ---
 draft_data <- tribble(
@@ -95,63 +107,64 @@ convert_odds_to_prob <- function(odds) {
   return(prob)
 }
 
-game_data_cleaned <- game_data %>% select(Matchup, consensus)
 today_ct <- as_date(now(tzone = "America/Chicago"))
 current_year <- year(today_ct)
 
+# FIXED: Use word boundaries to prevent "Hornets" from matching "Nets"
 match_team <- function(matchup_str, draft_data) {
   matchup_upper <- str_to_upper(matchup_str)
   for (i in 1:nrow(draft_data)) {
-    # Split the Matchup_Key by pipe to get alternatives
     keys <- str_split(draft_data$Matchup_Key[i], "\\|")[[1]]
     keys_upper <- str_to_upper(keys)
-    team_upper <- str_to_upper(draft_data$Team[i])
     
-    # Check if any of the keys match
+    # Check if any of the keys match (with word boundaries)
     for (key in keys_upper) {
-      if (str_detect(matchup_upper, fixed(key))) {
+      pattern <- paste0("\\b", key, "\\b")
+      if (str_detect(matchup_upper, regex(pattern))) {
         return(draft_data$Matchup_Key[i])
       }
-    }
-    
-    # Also check full team name
-    if (str_detect(matchup_upper, fixed(team_upper))) {
-      return(draft_data$Matchup_Key[i])
     }
   }
   return(NA_character_)
 }
 
 # Parse based on actual structure
-todays_picks <- game_data_cleaned %>%
+todays_picks <- game_data %>%
   filter(!is.na(Matchup) & Matchup != "") %>%
   mutate(
-    game_time_str = str_extract(Matchup, "(?:Oct|Nov|Dec|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep) \\d+, \\d+:\\d+[AP]M UTC")
+    row_id = row_number(),
+    game_time_str = str_extract(Matchup_raw, 
+      "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+\\d+,\\s+\\d+:\\d+\\s*[AP]M\\s+UTC")
   ) %>%
+  # Fill UP because date rows come AFTER team rows
   fill(game_time_str, .direction = "up") %>%
-  filter(str_detect(consensus, "(Current|Open):")) %>%
+  # Filter out the "Expert Picks" and "Advanced Insights" rows
+  filter(!str_detect(Matchup, "Expert Picks|Advanced Insights")) %>%
+  # Only keep rows with actual odds (contains +/- numbers)
+  filter(str_detect(consensus, "[+-]\\d+")) %>%
   mutate(
-    Matchup_Key = sapply(Matchup, match_team, draft_data = draft_data),
+    Matchup_Key = vapply(Matchup, match_team, draft_data = draft_data, FUN.VALUE = character(1)),
     game_time_str_with_year = paste(game_time_str, current_year),
     game_time_utc = parse_date_time(
-      str_remove(game_time_str_with_year, " UTC"),
+      str_remove(game_time_str_with_year, "\\s+UTC"),
       orders = c("b d, I:M p Y"),
       tz = "UTC"
     ),
     game_time_ct = with_tz(game_time_utc, tzone = "America/Chicago"),
-    game_date_ct = as_date(game_time_ct)
+    game_date_ct = as_date(game_time_ct),
+    # Create game_id: every 2 consecutive rows are a game
+    game_id = paste0(game_date_ct, "_", ceiling(row_number() / 2))
   ) %>%
-  filter(game_date_ct == today_ct) %>%
-  filter(!is.na(Matchup_Key)) %>%
+  filter(game_date_ct == today_ct, !is.na(Matchup_Key)) %>%
   mutate(
-    # Prefer Current odds over Open odds
-    current_odds_str = str_extract(consensus, "Current:\\s*[+-]?\\d+"),
-    open_odds_str = str_extract(consensus, "Open:\\s*[+-]?\\d+"),
-    odds_to_use = if_else(!is.na(current_odds_str), current_odds_str, open_odds_str),
-    moneyline = as.numeric(str_extract(odds_to_use, "[+-]?\\d+"))
+    # Extract odds from format like "-175Open: -189"
+    moneyline = as.numeric(str_extract(consensus, "^[+-]?\\d+")),
+    opening_odds = as.numeric(str_extract(consensus, "(?<=Open: )[+-]?\\d+"))
   ) %>%
+  # Remove duplicates - keep one row per team per game
+  distinct(Matchup_Key, game_id, .keep_all = TRUE) %>%
   mutate(implied_prob = convert_odds_to_prob(moneyline)) %>%
-  group_by(game_time_ct) %>%
+  group_by(game_id) %>%
   mutate(
     total_prob_in_game = sum(implied_prob, na.rm = TRUE),
     prob_no_vig = implied_prob / total_prob_in_game
@@ -165,7 +178,7 @@ todays_picks <- game_data_cleaned %>%
   ) %>%
   select(Date, Team, Pick = skins_pick, "Expected Skins" = expected_skins,
          Player = player, Moneyline = moneyline, "Implied Prob" = prob_no_vig,
-         Abbr = abbr, game_time_ct) %>%
+         Abbr = abbr, game_id) %>%
   arrange(desc(`Expected Skins`))
 ```
 
@@ -175,7 +188,7 @@ todays_picks <- game_data_cleaned %>%
 # Print Table 1: Today's Expected Skins by Team
 if (nrow(todays_picks) > 0) {
   knitr::kable(
-    select(todays_picks, -game_time_ct, -Abbr, -Date), 
+    select(todays_picks, -game_id, -Abbr, -Date), 
     digits = 3, 
     caption = "Today's Expected Skins by Team"
   ) %>%
@@ -207,7 +220,7 @@ if (nrow(todays_picks) > 0) {
 # Print Table 3: Zero-Sum Matchups
 if (nrow(todays_picks) > 0) {
   zero_sum_games <- todays_picks %>%
-    group_by(game_time_ct) %>%
+    group_by(game_id) %>%
     filter(
       n() == 2, # Exactly 2 teams in the game
       (all(Pick == "W") | all(Pick == "L")) # Both W or both L (creates zero-sum)
@@ -223,7 +236,7 @@ if (nrow(todays_picks) > 0) {
     )
   
   if (nrow(zero_sum_games) > 0) {
-    knitr::kable(select(zero_sum_games, -game_time_ct), caption = "Today's Zero-Sum Matchups") %>%
+    knitr::kable(select(zero_sum_games, -game_id), caption = "Today's Zero-Sum Matchups") %>%
       kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
       row_spec(0, bold = TRUE, color = "white", background = "#444444")
   } else {
