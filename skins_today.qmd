@@ -886,7 +886,7 @@ if (file.exists(yesterday_file)) {
 
 ---
 
-## Year-to-Date Cumulative Stats
+## Year-to-Date Cumulative Stats (work in progress)
 
 ```{r ytd_cumulative}
 #| echo: false
@@ -941,3 +941,4 @@ if (length(all_files) > 0) {
   cat("No historical data available yet.")
 }
 ```
+
