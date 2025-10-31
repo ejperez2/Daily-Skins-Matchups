@@ -25,9 +25,9 @@ schedule:
     - cron: '0 6 * * *'   #  1:00 AM CDT
     - cron: '30 6 * * *'  #  1:30 AM CDT
 
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
-
+# Allows you to run this workflow manually from the Actions tab
+      workflow_dispatch:
+  
 # Set permissions for the job
 permissions:
   contents: write # Changed from 'read' to 'write' to commit history
