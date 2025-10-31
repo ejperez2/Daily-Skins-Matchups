@@ -17,6 +17,7 @@ on:
     - cron: '0 2 * * *'   #  9:00 PM CDT (previous day UTC)
     - cron: '30 2 * * *'  #  9:30 PM CDT (previous day UTC)
     - cron: '0 3 * * *'   # 10:00 PM CDT (previous day UTC)
+    - cron: '17 3 * * *'  # 10:30 PM CDT (previous day UTC)
     - cron: '30 3 * * *'  # 10:30 PM CDT (previous day UTC)
     - cron: '0 4 * * *'   # 11:00 PM CDT (previous day UTC)
     - cron: '30 4 * * *'  # 11:30 PM CDT (previous day UTC)
