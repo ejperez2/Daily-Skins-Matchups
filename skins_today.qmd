@@ -618,7 +618,205 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
 
 ---
 
-## Yesterday's Results
+## Yesterday's Results (Work in Progress)
+
+
+```{r yesterday_matchup_table}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Create Yesterday's Head-to-Head Matchup Table
+yesterday_ct <- today_ct - days(1)
+yesterday_file <- file.path(history_dir, paste0(yesterday_ct, ".csv"))
+
+if (file.exists(yesterday_file)) {
+  yesterday_data <- read_csv(yesterday_file, show_col_types = FALSE)
+  
+  if (nrow(yesterday_data) > 0) {
+    
+    # Scrape yesterday's game results from cleaningtheglass.com
+    url_scores_yesterday <- paste0("https://cleaningtheglass.com/stats/games/?date=", yesterday_ct)
+    page_scores_yesterday <- read_html(url_scores_yesterday)
+    all_tables_yesterday <- page_scores_yesterday %>% html_elements("table")
+    
+    # Extract game results
+    yesterday_game_results <- data.frame()
+    
+    for (i in 1:length(all_tables_yesterday)) {
+      table_data <- all_tables_yesterday[[i]] %>% html_table()
+      
+      # Check if game is final
+      is_final <- FALSE
+      if (nrow(table_data) >= 3) {
+        status_row <- paste(unlist(table_data[3, ]), collapse = " ")
+        is_final <- grepl("Final", status_row, ignore.case = TRUE)
+      }
+      
+      # Extract scores
+      if (ncol(table_data) >= 3) {
+        game_scores <- table_data %>%
+          select(Abbr = 2, PTS_Str = 3) %>%
+          mutate(
+            Abbr = as.character(Abbr),
+            PTS = suppressWarnings(as.numeric(as.character(PTS_Str)))
+          ) %>%
+          filter(!is.na(PTS), PTS > 0) %>%
+          select(Abbr, PTS) %>%
+          mutate(is_final = is_final)
+        
+        if (nrow(game_scores) > 0) {
+          yesterday_game_results <- bind_rows(yesterday_game_results, game_scores)
+        }
+      }
+    }
+    
+    # Create wide format for game results to determine winners
+    yesterday_results_wide <- yesterday_game_results %>%
+      filter(is_final == TRUE) %>%
+      mutate(Game_ID = ceiling(row_number() / 2)) %>%
+      group_by(Game_ID) %>%
+      mutate(Team_Num = row_number()) %>%
+      ungroup() %>%
+      pivot_wider(
+        id_cols = Game_ID,
+        names_from = Team_Num,
+        values_from = c(Abbr, PTS)
+      )
+    
+    # Create Won_Game lookup based on actual scores
+    yesterday_won_lookup <- data.frame(Abbr = character(), Won_Game = logical())
+    
+    if (nrow(yesterday_results_wide) > 0) {
+      team_1 <- yesterday_results_wide %>%
+        select(Abbr = Abbr_1, PTS = PTS_1, Opp_PTS = PTS_2) %>%
+        mutate(Won_Game = PTS > Opp_PTS)  # TRUE if team won
+      
+      team_2 <- yesterday_results_wide %>%
+        select(Abbr = Abbr_2, PTS = PTS_2, Opp_PTS = PTS_1) %>%
+        mutate(Won_Game = PTS > Opp_PTS)  # TRUE if team won
+      
+      yesterday_won_lookup <- bind_rows(team_1, team_2) %>%
+        select(Abbr, Won_Game)
+    }
+    
+    # Add game_id to scraped results
+    yesterday_abbr_order <- yesterday_game_results %>%
+      filter(is_final == TRUE) %>%
+      mutate(game_id = paste0("game_", ceiling(row_number() / 2)))
+    
+    # Match yesterday_data with game results and calculate Won_Skin correctly
+    yesterday_with_game <- yesterday_data %>%
+      left_join(
+        yesterday_abbr_order %>% select(Abbr, game_id),
+        by = "Abbr"
+      ) %>%
+      left_join(yesterday_won_lookup, by = "Abbr")
+    
+    # Check if Won_Game column exists, if not create it as NA
+    if (!"Won_Game" %in% names(yesterday_with_game)) {
+      yesterday_with_game <- yesterday_with_game %>%
+        mutate(Won_Game = NA)
+    }
+    
+    yesterday_with_game <- yesterday_with_game %>%
+      mutate(
+        # CORRECT LOGIC: Win skin when (Pick=W AND Won_Game=TRUE) OR (Pick=L AND Won_Game=FALSE)
+        Won_Skin = case_when(
+          is.na(Won_Game) ~ NA,  # Game not found
+          Pick == "W" & Won_Game == TRUE ~ TRUE,   # Picked W, team won
+          Pick == "L" & Won_Game == FALSE ~ TRUE,  # Picked L, team lost
+          TRUE ~ FALSE  # All other cases = no skin
+        ),
+        Game_Status = ifelse(is.na(Won_Game), "Not Started", "Final")
+      ) %>%
+      arrange(game_id)
+    
+    # Build the matchup table - ONE ROW PER GAME
+    yesterday_matchup_table <- yesterday_with_game %>%
+      filter(!is.na(game_id)) %>%
+      group_by(game_id) %>%
+      summarise(
+        Player_1 = first(Player),
+        Team_1 = first(Team),
+        Pick_1 = first(Pick),
+        Won_Skin_1 = first(Won_Skin),
+        Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
+        Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
+        Pick_2 = if(n() > 1) nth(Pick, 2) else NA_character_,
+        Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA,
+        Status = first(Game_Status),
+        .groups = 'drop'
+      ) %>%
+      mutate(
+        # Format player names with color highlighting using format="html"
+        Player_1_Display = case_when(
+          !is.na(Won_Skin_1) & Won_Skin_1 == TRUE ~ 
+            cell_spec(Player_1, background = "#90EE90", bold = TRUE, format = "html"),
+          !is.na(Won_Skin_1) & Won_Skin_1 == FALSE ~ 
+            cell_spec(Player_1, background = "#FFB6C6", bold = TRUE, format = "html"),
+          TRUE ~ Player_1
+        ),
+        Player_2_Display = case_when(
+          is.na(Player_2) ~ "",
+          !is.na(Won_Skin_2) & Won_Skin_2 == TRUE ~ 
+            cell_spec(Player_2, background = "#90EE90", bold = TRUE, format = "html"),
+          !is.na(Won_Skin_2) & Won_Skin_2 == FALSE ~ 
+            cell_spec(Player_2, background = "#FFB6C6", bold = TRUE, format = "html"),
+          TRUE ~ Player_2
+        ),
+        # Add checkmarks for Won_Skin status
+        Won_1 = case_when(
+          is.na(Won_Skin_1) ~ "",
+          Won_Skin_1 == TRUE ~ "✓ Yes",
+          Won_Skin_1 == FALSE ~ "✗ No",
+          TRUE ~ ""
+        ),
+        Won_2 = case_when(
+          is.na(Player_2) ~ "",
+          is.na(Won_Skin_2) ~ "",
+          Won_Skin_2 == TRUE ~ "✓ Yes",
+          Won_Skin_2 == FALSE ~ "✗ No",
+          TRUE ~ ""
+        ),
+        # Create vs. display
+        VS = if_else(is.na(Player_2), "", "vs."),
+        Team_2_Display = if_else(is.na(Team_2), "", Team_2),
+        Pick_2_Display = if_else(is.na(Pick_2), "", Pick_2)
+      ) %>%
+      select(
+        Player = Player_1_Display,
+        Team = Team_1,
+        Pick = Pick_1,
+        `Won Skin` = Won_1,
+        VS,
+        `Player 2` = Player_2_Display,
+        `Team 2` = Team_2_Display,
+        `Pick 2` = Pick_2_Display,
+        `Won Skin 2` = Won_2,
+        Status
+      )
+    
+    # Create the table with HTML formatting enabled
+    if (nrow(yesterday_matchup_table) > 0) {
+      knitr::kable(
+        yesterday_matchup_table,
+        align = 'c',
+        caption = paste0(format(yesterday_ct, "%B %d, %Y"), " - Head-to-Head Matchups"),
+        escape = FALSE,  # Allow HTML formatting from cell_spec
+        format = "html"  # Explicitly set format to HTML
+      ) %>%
+        kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+    } else {
+      cat(paste0("No completed games found for ", format(yesterday_ct, "%A, %B %d, %Y"), "."))
+    }
+  } else {
+    cat(paste0("No data available for ", format(yesterday_ct, "%A, %B %d, %Y"), "."))
+  }
+} else {
+  cat(paste0("No data available for ", format(yesterday_ct, "%A, %B %d, %Y"), "."))
+}
+```
 
 ```{r yesterday_results}
 #| echo: false
@@ -693,7 +891,7 @@ if (file.exists(yesterday_file)) {
 
 ---
 
-## Year-to-Date Cumulative Stats
+## Year-to-Date Cumulative Stats (work in progress)
 
 ```{r ytd_cumulative}
 #| echo: false
