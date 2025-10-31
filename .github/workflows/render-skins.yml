@@ -1,10 +1,10 @@
 name: Render and Publish Skins Page
 
 on:
-  # Schedule to run at 13:00 UTC (7:00 AM CST / 8:00 AM CDT)
- schedule:
+  # Schedule based on UTC time
+  schedule:
     # --- Daytime Runs (CDT / UTC-5) ---
-  #  - cron: '0 12 * * *'  #  7:00 AM CDT
+   # - cron: '0 12 * * *'  #  7:00 AM CDT
     - cron: '0 14 * * *'  #  9:00 AM CDT
     - cron: '0 18 * * *'  #  1:00 PM CDT
     - cron: '0 22 * * *'  #  5:00 PM CDT
@@ -25,12 +25,12 @@ on:
     - cron: '0 6 * * *'   #  1:00 AM CDT
     - cron: '30 6 * * *'  #  1:30 AM CDT
 
-# Allows you to run this workflow manually from the Actions tab
- workflow_dispatch:
-  
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
 # Set permissions for the job
 permissions:
-  contents: write # Changed from 'read' to 'write' to commit history
+  contents: write
   pages: write
   id-token: write
 
@@ -41,9 +41,8 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Fetch all history for proper commits
+          fetch-depth: 0 
       
-      # Install system libraries required by rvest/xml2
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -65,23 +64,19 @@ jobs:
       - name: Set up Quarto
         uses: quarto-dev/quarto-actions/setup@v2
       
-      # Install R packages (added readr)
       - name: Install R Dependencies
         run: |
           R -e "install.packages('pacman', dependencies = TRUE)"
           R -e "pacman::p_load(rvest, httr, dplyr, tidyr, stringr, lubridate, tibble, knitr, kableExtra, readr)"
       
-      # Create history directory if it doesn't exist
       - name: Create history directory
         run: |
           mkdir -p skins_history
       
-      # Render the document
       - name: Render Quarto Document
         run: |
           quarto render skins_today.qmd --to html --output-dir _site --output index.html
       
-      # Commit the updated history back to the repository
       - name: Commit history updates
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
@@ -89,7 +84,7 @@ jobs:
           git add skins_history/*.csv
           git diff --staged --quiet || git commit -m "Update skins history - $(date +'%Y-%m-%d')"
           git push
-        continue-on-error: true # Don't fail if there are no changes to commit
+        continue-on-error: true 
       
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
