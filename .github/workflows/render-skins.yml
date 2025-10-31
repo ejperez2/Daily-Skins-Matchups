@@ -2,7 +2,7 @@ name: Render and Publish Skins Page
 
 on:
   # Schedule to run at 13:00 UTC (7:00 AM CST / 8:00 AM CDT)
-schedule:
+ schedule:
     # --- Daytime Runs (CDT / UTC-5) ---
   #  - cron: '0 12 * * *'  #  7:00 AM CDT
     - cron: '0 14 * * *'  #  9:00 AM CDT
@@ -26,7 +26,7 @@ schedule:
     - cron: '30 6 * * *'  #  1:30 AM CDT
 
 # Allows you to run this workflow manually from the Actions tab
-      workflow_dispatch:
+ workflow_dispatch:
   
 # Set permissions for the job
 permissions:
