@@ -110,6 +110,15 @@ convert_odds_to_prob <- function(odds) {
 today_ct <- as_date(now(tzone = "America/Chicago"))
 current_year <- year(today_ct)
 
+# Use 3am cutoff: if it's before 3am, use yesterday's date for results
+# This captures late games that finish after midnight
+current_time_ct <- now(tzone = "America/Chicago")
+if (hour(current_time_ct) < 3) {
+  results_date <- today_ct - days(1)
+} else {
+  results_date <- today_ct
+}
+
 # FIXED: Use word boundaries to prevent "Hornets" from matching "Nets"
 match_team <- function(matchup_str, draft_data) {
   matchup_upper <- str_to_upper(matchup_str)
@@ -209,18 +218,25 @@ if (nrow(todays_picks) > 0) {
     summarise(
       `Total Games` = n(),
       `Total Expected Skins` = sum(`Expected Skins`, na.rm = TRUE),
+      expected_skins_probs = list(`Expected Skins`),
       .groups = 'drop'
     ) %>%
     left_join(self_zero_sum, by = c("Player" = "player")) %>%
     mutate(
       self_zero_sum_count = ifelse(is.na(self_zero_sum_count), 0, self_zero_sum_count),
       `Max Skins` = `Total Games` - self_zero_sum_count,
-      `Expected Skins %` = `Total Expected Skins` / `Total Games`
+      `Expected Skins %` = paste0(sprintf("%.0f", (`Total Expected Skins` / `Total Games`) * 100), "%"),
+      # Perfect Skins Probability: only possible if player has exactly 5 games with no self zero-sum
+      `Perfect Skins Probability` = ifelse(
+        `Max Skins` == 5 & `Total Games` == 5,
+        paste0(sprintf("%.0f", prod(unlist(expected_skins_probs)) * 100), "%"),
+        "0%"
+      )
     ) %>%
-    select(Player, `Total Games`, `Total Expected Skins`, `Expected Skins %`, `Max Skins`) %>%
+    select(Player, `Total Games`, `Total Expected Skins`, `Expected Skins %`, `Max Skins`, `Perfect Skins Probability`) %>%
     arrange(desc(`Total Expected Skins`))
   
-  knitr::kable(player_summary, digits = 3, caption = "Total Expected Skins by Player") %>%
+  knitr::kable(player_summary, digits = 1, align = 'c', caption = "Total Expected Skins by Player") %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 }
 ```
@@ -247,12 +263,11 @@ if (nrow(todays_picks) > 0) {
     )
   
   if (nrow(zero_sum_games) > 0) {
-    knitr::kable(select(zero_sum_games, -game_id), caption = "Today's Zero-Sum Matchups") %>%
+    knitr::kable(select(zero_sum_games, -game_id), align = 'c', caption = "Today's Zero-Sum Matchups") %>%
       kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
       row_spec(0, bold = TRUE, color = "white", background = "#444444")
   } else {
-    cat("<h3>Today's Zero-Sum Matchups</h3>")
-    cat("<p>No zero-sum matchups today.</p>")
+    cat("No zero-sum matchups today.")
   }
 }
 ```
@@ -262,15 +277,21 @@ if (nrow(todays_picks) > 0) {
 
 # Print Table 3: Today's Expected Skins by Team
 if (nrow(todays_picks) > 0) {
+  team_table_data <- todays_picks %>%
+    mutate(`Implied Prob` = paste0(sprintf("%.0f", `Implied Prob` * 100), "%")) %>%
+    select(-game_id, -Abbr, -Date) %>%
+    arrange(Player, Team)
+  
   knitr::kable(
-    select(todays_picks, -game_id, -Abbr, -Date), 
-    digits = 3, 
+    team_table_data, 
+    digits = 1, 
+    align = 'c',
     caption = "Today's Expected Skins by Team"
   ) %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
     column_spec(3, bold = TRUE)
 } else {
-  cat("<p style='color:#666;'>No games scheduled for today.</p>")
+  cat("No games scheduled for today.")
 }
 ```
 
@@ -279,6 +300,170 @@ if (nrow(todays_picks) > 0) {
 ## Today's Results & Skins Luck
 
 This section scrapes `cleaningtheglass.com` for game results. Games that are final or in-progress will appear here.
+
+```{r matchup_table}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Create Head-to-Head Matchup Table
+if (nrow(todays_picks) > 0) {
+  
+  # First, scrape results to check game status
+  url_scores <- paste0("https://cleaningtheglass.com/stats/games/?date=", results_date)
+  page_scores <- read_html(url_scores)
+  all_tables <- page_scores %>% html_elements("table")
+  
+  # Extract game results and status
+  matchup_game_results <- data.frame()
+  
+  for (i in 1:length(all_tables)) {
+    table_data <- all_tables[[i]] %>% html_table()
+    
+    # Check if game is final
+    is_final <- FALSE
+    if (nrow(table_data) >= 3) {
+      status_row <- paste(unlist(table_data[3, ]), collapse = " ")
+      is_final <- grepl("Final", status_row, ignore.case = TRUE)
+    }
+    
+    # Extract scores
+    if (ncol(table_data) >= 3) {
+      game_scores <- table_data %>%
+        select(Abbr = 2, PTS_Str = 3) %>%
+        mutate(
+          Abbr = as.character(Abbr),
+          PTS = suppressWarnings(as.numeric(as.character(PTS_Str)))
+        ) %>%
+        filter(!is.na(PTS), PTS > 0) %>%
+        select(Abbr, PTS) %>%
+        mutate(is_final = is_final)
+      
+      if (nrow(game_scores) > 0) {
+        matchup_game_results <- bind_rows(matchup_game_results, game_scores)
+      }
+    }
+  }
+  
+  # Create wide format for game results (only final games)
+  matchup_results_wide <- matchup_game_results %>%
+    filter(is_final == TRUE) %>%
+    mutate(Game_ID = ceiling(row_number() / 2)) %>%
+    group_by(Game_ID) %>%
+    mutate(Team_Num = row_number()) %>%
+    ungroup() %>%
+    pivot_wider(
+      id_cols = Game_ID,
+      names_from = Team_Num,
+      values_from = c(Abbr, PTS)
+    )
+  
+  # Create Won_Game lookup
+  matchup_won_lookup <- data.frame(Abbr = character(), Won_Game = logical())
+  
+  if (nrow(matchup_results_wide) > 0) {
+    team_1 <- matchup_results_wide %>%
+      select(Abbr = Abbr_1, PTS = PTS_1, Opp_PTS = PTS_2) %>%
+      mutate(Won_Game = PTS > Opp_PTS)
+    
+    team_2 <- matchup_results_wide %>%
+      select(Abbr = Abbr_2, PTS = PTS_2, Opp_PTS = PTS_1) %>%
+      mutate(Won_Game = PTS > Opp_PTS)
+    
+    matchup_won_lookup <- bind_rows(team_1, team_2) %>%
+      select(Abbr, Won_Game)
+  }
+  
+  # Build the matchup table - ONE ROW PER GAME
+  matchup_prep <- todays_picks %>%
+    left_join(matchup_won_lookup, by = "Abbr") %>%
+    mutate(
+      Won_Skin = case_when(
+        Won_Game == TRUE & Pick == "W" ~ TRUE,
+        Won_Game == FALSE & Pick == "L" ~ TRUE,
+        is.na(Won_Game) ~ NA,
+        TRUE ~ FALSE
+      ),
+      Game_Status = ifelse(is.na(Won_Game), "Not Started", "Final")
+    ) %>%
+    arrange(game_id)
+  
+  # Create one row per game with both players
+  matchup_table <- matchup_prep %>%
+    group_by(game_id) %>%
+    summarise(
+      Player_1 = first(Player),
+      Team_1 = first(Team),
+      Pick_1 = first(Pick),
+      Won_Skin_1 = first(Won_Skin),
+      Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
+      Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
+      Pick_2 = if(n() > 1) nth(Pick, 2) else NA_character_,
+      Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA,
+      Status = first(Game_Status),
+      .groups = 'drop'
+    ) %>%
+    mutate(
+      # Format player names with color highlighting using format="html"
+      Player_1_Display = case_when(
+        Status == "Final" & !is.na(Won_Skin_1) & Won_Skin_1 ~ 
+          cell_spec(Player_1, background = "#90EE90", bold = TRUE, format = "html"),
+        Status == "Final" & !is.na(Won_Skin_1) & !Won_Skin_1 ~ 
+          cell_spec(Player_1, background = "#FFB6C6", bold = TRUE, format = "html"),
+        TRUE ~ Player_1
+      ),
+      Player_2_Display = case_when(
+        is.na(Player_2) ~ "",
+        Status == "Final" & !is.na(Won_Skin_2) & Won_Skin_2 ~ 
+          cell_spec(Player_2, background = "#90EE90", bold = TRUE, format = "html"),
+        Status == "Final" & !is.na(Won_Skin_2) & !Won_Skin_2 ~ 
+          cell_spec(Player_2, background = "#FFB6C6", bold = TRUE, format = "html"),
+        TRUE ~ Player_2
+      ),
+      # Add checkmarks for Won_Skin status
+      Won_1 = case_when(
+        is.na(Won_Skin_1) ~ "",
+        Won_Skin_1 ~ "✓ Yes",
+        TRUE ~ "✗ No"
+      ),
+      Won_2 = case_when(
+        is.na(Player_2) ~ "",
+        is.na(Won_Skin_2) ~ "",
+        Won_Skin_2 ~ "✓ Yes",
+        TRUE ~ "✗ No"
+      ),
+      # Create vs. display
+      VS = if_else(is.na(Player_2), "", "vs."),
+      Team_2_Display = if_else(is.na(Team_2), "", Team_2),
+      Pick_2_Display = if_else(is.na(Pick_2), "", Pick_2)
+    ) %>%
+    select(
+      Player = Player_1_Display,
+      Team = Team_1,
+      Pick = Pick_1,
+      `Won Skin` = Won_1,
+      VS,
+      `Player 2` = Player_2_Display,
+      `Team 2` = Team_2_Display,
+      `Pick 2` = Pick_2_Display,
+      `Won Skin 2` = Won_2,
+      Status
+    )
+  
+  # Create the table with HTML formatting enabled
+  knitr::kable(
+    matchup_table,
+    align = 'c',
+    caption = "Head-to-Head Matchups",
+    escape = FALSE,  # Allow HTML formatting from cell_spec
+    format = "html"  # Explicitly set format to HTML
+  ) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+  
+} else {
+  cat("No games scheduled for today.")
+}
+```
 
 ```{r results_and_luck}
 #| echo: false
@@ -289,7 +474,8 @@ This section scrapes `cleaningtheglass.com` for game results. Games that are fin
 if (nrow(todays_picks) > 0) {
   
   # 1. Scrape the Live Game Data with date parameter
-  url_scores <- paste0("https://cleaningtheglass.com/stats/games/?date=", today_ct)
+  # Use results_date to capture late games that finish after midnight
+  url_scores <- paste0("https://cleaningtheglass.com/stats/games/?date=", results_date)
   page_scores <- read_html(url_scores)
   
   # 2. Get all tables (each table contains one game)
@@ -390,15 +576,15 @@ if (nrow(todays_picks) > 0) {
     arrange(Player, Team)
   
   if (nrow(completed_games_table) > 0) {
-    knitr::kable(completed_games_table, digits = 3, caption = "Skins Results for Completed Games") %>%
+    knitr::kable(completed_games_table, digits = 1, align = 'c', caption = "Skins Results for Completed Games") %>%
       kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
       column_spec(c(5, 7), bold = TRUE)
   } else {
-    cat("<p style='color:#666;'>No games have been completed yet today.</p>")
+    cat("No games have been completed yet today.")
   }
   
 } else {
-  cat("<p style='color:#666;'>No games scheduled for today.</p>")
+  cat("No games scheduled for today.")
 }
 ```
 
@@ -421,7 +607,8 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
   
   knitr::kable(
     final_player_summary,
-    digits = 3,
+    digits = 1,
+    align = 'c',
     caption = "Final Player Summary (Expected vs. Actual)"
   ) %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
@@ -467,7 +654,7 @@ if (file.exists(yesterday_file)) {
   if (nrow(yesterday_completed) > 0) {
     cat(paste0("<h3>", format(yesterday_ct, "%A, %B %d, %Y"), " - Skins Results</h3>"))
     
-    knitr::kable(yesterday_completed, digits = 3) %>%
+    knitr::kable(yesterday_completed, digits = 1, align = 'c') %>%
       kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
       column_spec(c(5, 7), bold = TRUE)
     
@@ -490,16 +677,17 @@ if (file.exists(yesterday_file)) {
     cat("<br>")
     knitr::kable(
       yesterday_player_summary,
-      digits = 3,
+      digits = 1,
+      align = 'c',
       caption = paste0(format(yesterday_ct, "%B %d"), " - Player Summary")
     ) %>%
       kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
       column_spec(4, bold = TRUE)
   } else {
-    cat(paste0("<p style='color:#666;'>No completed games found for ", format(yesterday_ct, "%A, %B %d, %Y"), ".</p>"))
+    cat(paste0("No completed games found for ", format(yesterday_ct, "%A, %B %d, %Y"), "."))
   }
 } else {
-  cat(paste0("<p style='color:#666;'>No data available for ", format(yesterday_ct, "%A, %B %d, %Y"), ".</p>"))
+  cat(paste0("No data available for ", format(yesterday_ct, "%A, %B %d, %Y"), "."))
 }
 ```
 
@@ -547,15 +735,16 @@ if (length(all_files) > 0) {
     
     knitr::kable(
       ytd_summary,
-      digits = 3,
+      digits = 1,
+      align = 'c',
       caption = paste0(current_year, " Year-to-Date Cumulative Stats")
     ) %>%
       kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
       column_spec(5, bold = TRUE)
   } else {
-    cat("<p style='color:#666;'>No completed games in year-to-date history.</p>")
+    cat("No completed games in year-to-date history.")
   }
 } else {
-  cat("<p style='color:#666;'>No historical data available yet.</p>")
+  cat("No historical data available yet.")
 }
 ```
