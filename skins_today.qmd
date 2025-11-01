@@ -742,16 +742,54 @@ if (nrow(todays_picks) > 0) {
 
 # Print Table 3: Today's Expected Skins by Team
 if (nrow(todays_picks) > 0) {
-  team_table_data <- todays_picks %>%
+  
+  # Join with results data to determine if games are complete and skins won
+  team_table_data <- todays_picks
+  
+  # If todays_results exists, join to get Won_Game status
+  if (exists("todays_results")) {
+    team_table_data <- team_table_data %>%
+      left_join(
+        todays_results %>% select(Team, Won_Game, Actual_Skins),
+        by = "Team"
+      ) %>%
+      mutate(
+        Won_Skin = case_when(
+          is.na(Won_Game) ~ NA,
+          Won_Game == TRUE & Pick == "W" ~ TRUE,
+          Won_Game == FALSE & Pick == "L" ~ TRUE,
+          TRUE ~ FALSE
+        ),
+        # Apply color-coding to Player column
+        Player_Display = case_when(
+          !is.na(Won_Skin) & Won_Skin == TRUE ~ 
+            cell_spec(Player, background = "#90EE90", color = "#000000 !important", 
+                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+          !is.na(Won_Skin) & Won_Skin == FALSE ~ 
+            cell_spec(Player, background = "#FFB6C6", color = "#000000 !important", 
+                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+          TRUE ~ Player
+        )
+      )
+  } else {
+    # No results yet, use original Player column
+    team_table_data <- team_table_data %>%
+      mutate(Player_Display = Player)
+  }
+  
+  # Format the table
+  team_table_data <- team_table_data %>%
     mutate(`Implied Prob` = paste0(sprintf("%.0f", `Implied Prob` * 100), "%")) %>%
-    select(-game_id, -Abbr, -Date) %>%
-    arrange(Player, Team)
+    select(Team, Pick, `Expected Skins`, Player = Player_Display, Moneyline, `Implied Prob`) %>%
+    arrange(Team)
   
   knitr::kable(
     team_table_data, 
     digits = 1, 
     align = 'c',
-    caption = "Today's Expected Skins by Team"
+    caption = "Today's Expected Skins by Team",
+    escape = FALSE,  # Important: allows HTML formatting
+    format = "html"
   ) %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
     column_spec(3, bold = TRUE)
