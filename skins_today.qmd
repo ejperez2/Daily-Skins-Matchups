@@ -43,26 +43,31 @@ cat(paste0("<p style='font-size:14px; color:#999;'><strong>Last updated:</strong
 # This chunk must run first (invisibly) to create 'todays_picks'
 # for the results tables that now appear at the top.
 
-# --- Part 1: Scrape Expected Odds ---
-url <- paste0("https://www.sportsline.com/nba/odds/money-line/",
-              "?t=", format(Sys.time(), "%Y%m%d%H%M%S"))
-googlebot_ua <- "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
-page_session <- rvest::session(url, httr::user_agent(googlebot_ua))
-html_content <- rvest::read_html(page_session)
-game_data_raw <- html_content %>% html_element("table") %>% html_table()
+# --- Part 0: Define Time and Data Source ---
 
-# Extract correct columns and clean team names
-game_data <- data.frame(
-  Matchup_raw = game_data_raw[[1]],
-  consensus = game_data_raw[[3]],
-  stringsAsFactors = FALSE
-) %>%
-  mutate(
-    # Remove the record (e.g., "2-1") from team names
-    Matchup = str_remove(Matchup_raw, "\\d+-\\d+$")
-  )
+# Get current time in Chicago
+current_time_ct <- now(tzone = "America/Chicago")
+current_hour_ct <- hour(current_time_ct)
 
-# --- Part 2: Define Skins Picks ---
+# Define the "skins date" based on the 2 AM cutoff.
+# A "day" runs from 2:00 AM to 1:59 AM the next morning.
+if (current_hour_ct < 2) {
+  # If it's 1 AM, it's still "yesterday's" skins date
+  skins_date <- as_date(current_time_ct) - days(1)
+} else {
+  # If it's 2 AM or later, it's "today's" skins date
+  skins_date <- as_date(current_time_ct)
+}
+
+# Use skins_date as the definitive date for this run
+today_ct <- skins_date 
+current_year <- year(today_ct)
+
+# Define the 11 PM - 2 AM blackout window for scraping
+# 23 = 11 PM, 0 = 12 AM, 1 = 1 AM
+is_blackout_window <- current_hour_ct >= 23 | current_hour_ct < 2
+
+# Define draft_data (needs to be available for both branches)
 draft_data <- tribble(
   ~Team, ~Matchup_Key, ~abbr, ~skins_pick, ~player,
   "Utah Jazz", "Jazz|Utah", "UTA", "L", "Eristeo",
@@ -97,98 +102,160 @@ draft_data <- tribble(
   "Dallas Mavericks", "Mavericks|Dallas", "DAL", "W", "Thomas"
 )
 
-# --- Part 3: Calculate Expected Skins ---
-convert_odds_to_prob <- function(odds) {
-  prob <- case_when(
-    odds < 0 ~ abs(odds) / (abs(odds) + 100),
-    odds > 0 ~ 100 / (odds + 100),
-    TRUE ~ NA_real_
-  )
-  return(prob)
-}
-
-today_ct <- as_date(now(tzone = "America/Chicago"))
-current_year <- year(today_ct)
-
-# Use 3am cutoff: if it's before 3am, use yesterday's date for results
-# This captures late games that finish after midnight
-current_time_ct <- now(tzone = "America/Chicago")
-if (hour(current_time_ct) < 3) {
-  results_date <- today_ct - days(1)
-} else {
-  results_date <- today_ct
-}
-
-# FIXED: Use word boundaries to prevent "Hornets" from matching "Nets"
-match_team <- function(matchup_str, draft_data) {
-  matchup_upper <- str_to_upper(matchup_str)
-  for (i in 1:nrow(draft_data)) {
-    keys <- str_split(draft_data$Matchup_Key[i], "\\|")[[1]]
-    keys_upper <- str_to_upper(keys)
+# --- Part 1: Get Data (Conditional) ---
+if (is_blackout_window) {
+  # --- BRANCH 1: LOAD FROM CSV (11 PM - 2 AM) ---
+  cat("NOTICE: In blackout window (11pm-2am CT). Loading data from CSV for", as.character(skins_date), "\n")
+  file_path <- file.path(history_dir, paste0(skins_date, ".csv"))
+  
+  if (file.exists(file_path)) {
+    csv_data <- read_csv(file_path, show_col_types = FALSE)
     
-    # Check if any of the keys match (with word boundaries)
-    for (key in keys_upper) {
-      pattern <- paste0("\\b", key, "\\b")
-      if (str_detect(matchup_upper, regex(pattern))) {
-        return(draft_data$Matchup_Key[i])
+    # Re-format CSV data to match the 'todays_picks' structure
+    # We must stub columns that don't exist in the CSV (Moneyline, Implied Prob, game_id)
+    todays_picks <- csv_data %>%
+      mutate(
+        "Expected Skins" = Expected_Skins,
+        Moneyline = NA_real_,
+        "Implied Prob" = NA_real_,
+        # Create a dummy game_id. This assumes the CSV is ordered by game.
+        game_id = paste0(Date, "_", ceiling(row_number() / 2))
+      ) %>%
+      select(Date, Team, Pick, "Expected Skins", Player, Moneyline, "Implied Prob", Abbr, game_id) %>%
+      arrange(desc(`Expected Skins`))
+      
+    cat("Successfully loaded data from:", file_path, "\n")
+    
+  } else {
+    # Blackout window, but no file found. Create an empty table.
+    cat("ERROR: In blackout window, but file not found at:", file_path, "\nNo data to display.\n")
+    todays_picks <- data.frame(
+        Date = as.Date(character()), Team = character(), Pick = character(), 
+        `Expected Skins` = double(), Player = character(), Moneyline = double(), 
+        `Implied Prob` = double(), Abbr = character(), game_id = character()
+      )
+  }
+  
+} else {
+  # --- BRANCH 2: SCRAPE FROM WEB (2 AM - 11 PM) ---
+  cat("NOTICE: Scraping live data from sportsline.com\n")
+  
+  # --- Part 1.1: Scrape Expected Odds ---
+  url <- paste0("https://www.sportsline.com/nba/odds/money-line/",
+                "?t=", format(Sys.time(), "%Y%m%d%H%M%S"))
+  googlebot_ua <- "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html"
+  page_session <- rvest::session(url, httr::user_agent(googlebot_ua))
+  html_content <- rvest::read_html(page_session)
+  game_data_raw <- html_content %>% html_element("table") %>% html_table()
+  
+  # Extract correct columns and clean team names
+  game_data <- data.frame(
+    Matchup_raw = game_data_raw[[1]],
+    consensus = game_data_raw[[3]],
+    stringsAsFactors = FALSE
+  ) %>%
+    mutate(
+      # Remove the record (e.g., "2-1") from team names
+      Matchup = str_remove(Matchup_raw, "\\d+-\\d+$")
+    )
+
+  # --- Part 1.2: Calculate Expected Skins ---
+  convert_odds_to_prob <- function(odds) {
+    prob <- case_when(
+      odds < 0 ~ abs(odds) / (abs(odds) + 100),
+      odds > 0 ~ 100 / (odds + 100),
+      TRUE ~ NA_real_
+    )
+    return(prob)
+  }
+  
+  # FIXED: Use word boundaries to prevent "Hornets" from matching "Nets"
+  match_team <- function(matchup_str, draft_data) {
+    matchup_upper <- str_to_upper(matchup_str)
+    for (i in 1:nrow(draft_data)) {
+      keys <- str_split(draft_data$Matchup_Key[i], "\\|")[[1]]
+      keys_upper <- str_to_upper(keys)
+      
+      # Check if any of the keys match (with word boundaries)
+      for (key in keys_upper) {
+        pattern <- paste0("\\b", key, "\\b")
+        if (str_detect(matchup_upper, regex(pattern))) {
+          return(draft_data$Matchup_Key[i])
+        }
       }
     }
+    return(NA_character_)
   }
-  return(NA_character_)
+  
+  # Parse based on actual structure
+  todays_picks <- game_data %>%
+    filter(!is.na(Matchup) & Matchup != "") %>%
+    mutate(
+      row_id = row_number(),
+      game_time_str = str_extract(Matchup_raw, 
+        "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+\\d+,\\s+\\d+:\\d+\\s*[AP]M\\s+UTC")
+    ) %>%
+    # Fill UP because date rows come AFTER team rows
+    fill(game_time_str, .direction = "up") %>%
+    # Filter out the "Expert Picks" and "Advanced Insights" rows
+    filter(!str_detect(Matchup, "Expert Picks|Advanced Insights")) %>%
+    # Only keep rows with actual odds (contains +/- numbers)
+    filter(str_detect(consensus, "[+-]\\d+")) %>%
+    mutate(
+      Matchup_Key = vapply(Matchup, match_team, draft_data = draft_data, FUN.VALUE = character(1)),
+      game_time_str_with_year = paste(game_time_str, current_year),
+      game_time_utc = parse_date_time(
+        str_remove(game_time_str_with_year, "\\s+UTC"),
+        orders = c("b d, I:M p Y"),
+        tz = "UTC"
+      ),
+      game_time_ct = with_tz(game_time_utc, tzone = "America/Chicago"),
+      game_date_ct = as_date(game_time_ct),
+      # Create game_id: every 2 consecutive rows are a game
+      game_id = paste0(game_date_ct, "_", ceiling(row_number() / 2))
+    ) %>%
+    # *** THIS IS THE KEY FILTER ***
+    # It now filters for games matching the "skins_date" (which is today_ct)
+    filter(game_date_ct == today_ct, !is.na(Matchup_Key)) %>%
+    mutate(
+      # Extract odds from format like "-175Open: -189"
+      moneyline = as.numeric(str_extract(consensus, "^[+-]?\\d+")),
+      opening_odds = as.numeric(str_extract(consensus, "(?<=Open: )[+-]?\\d+"))
+    ) %>%
+    # Remove duplicates - keep one row per team per game
+    distinct(Matchup_Key, game_id, .keep_all = TRUE) %>%
+    mutate(implied_prob = convert_odds_to_prob(moneyline)) %>%
+    group_by(game_id) %>%
+    mutate(
+      total_prob_in_game = sum(implied_prob, na.rm = TRUE),
+      prob_no_vig = implied_prob / total_prob_in_game
+    ) %>%
+    ungroup() %>%
+    left_join(draft_data, by = "Matchup_Key") %>%
+    filter(!is.na(Team)) %>%
+    mutate(
+      expected_skins = if_else(skins_pick == "W", prob_no_vig, 1 - prob_no_vig),
+      Date = today_ct
+    ) %>%
+    select(Date, Team, Pick = skins_pick, "Expected Skins" = expected_skins,
+           Player = player, Moneyline = moneyline, "Implied Prob" = prob_no_vig,
+           Abbr = abbr, game_id) %>%
+    arrange(desc(`Expected Skins`))
 }
 
-# Parse based on actual structure
-todays_picks <- game_data %>%
-  filter(!is.na(Matchup) & Matchup != "") %>%
-  mutate(
-    row_id = row_number(),
-    game_time_str = str_extract(Matchup_raw, 
-      "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+\\d+,\\s+\\d+:\\d+\\s*[AP]M\\s+UTC")
-  ) %>%
-  # Fill UP because date rows come AFTER team rows
-  fill(game_time_str, .direction = "up") %>%
-  # Filter out the "Expert Picks" and "Advanced Insights" rows
-  filter(!str_detect(Matchup, "Expert Picks|Advanced Insights")) %>%
-  # Only keep rows with actual odds (contains +/- numbers)
-  filter(str_detect(consensus, "[+-]\\d+")) %>%
-  mutate(
-    Matchup_Key = vapply(Matchup, match_team, draft_data = draft_data, FUN.VALUE = character(1)),
-    game_time_str_with_year = paste(game_time_str, current_year),
-    game_time_utc = parse_date_time(
-      str_remove(game_time_str_with_year, "\\s+UTC"),
-      orders = c("b d, I:M p Y"),
-      tz = "UTC"
-    ),
-    game_time_ct = with_tz(game_time_utc, tzone = "America/Chicago"),
-    game_date_ct = as_date(game_time_ct),
-    # Create game_id: every 2 consecutive rows are a game
-    game_id = paste0(game_date_ct, "_", ceiling(row_number() / 2))
-  ) %>%
-  filter(game_date_ct == today_ct, !is.na(Matchup_Key)) %>%
-  mutate(
-    # Extract odds from format like "-175Open: -189"
-    moneyline = as.numeric(str_extract(consensus, "^[+-]?\\d+")),
-    opening_odds = as.numeric(str_extract(consensus, "(?<=Open: )[+-]?\\d+"))
-  ) %>%
-  # Remove duplicates - keep one row per team per game
-  distinct(Matchup_Key, game_id, .keep_all = TRUE) %>%
-  mutate(implied_prob = convert_odds_to_prob(moneyline)) %>%
-  group_by(game_id) %>%
-  mutate(
-    total_prob_in_game = sum(implied_prob, na.rm = TRUE),
-    prob_no_vig = implied_prob / total_prob_in_game
-  ) %>%
-  ungroup() %>%
-  left_join(draft_data, by = "Matchup_Key") %>%
-  filter(!is.na(Team)) %>%
-  mutate(
-    expected_skins = if_else(skins_pick == "W", prob_no_vig, 1 - prob_no_vig),
-    Date = today_ct
-  ) %>%
-  select(Date, Team, Pick = skins_pick, "Expected Skins" = expected_skins,
-         Player = player, Moneyline = moneyline, "Implied Prob" = prob_no_vig,
-         Abbr = abbr, game_id) %>%
-  arrange(desc(`Expected Skins`))
+# --- Part 2: Handle Draft Data Mismatch ---
+# (This runs for both CSV and Scrape methods)
+if (nrow(todays_picks) > 0) {
+  teams_in_picks <- unique(todays_picks$Team)
+  teams_in_draft <- unique(draft_data$Team)
+  
+  # Teams that are in picks but not in draft (indicates a mismatch in draft_data)
+  unmatched_teams_in_picks <- setdiff(teams_in_picks, teams_in_draft)
+  if (length(unmatched_teams_in_picks) > 0) {
+    cat("WARNING: Teams in scraped data but not in draft_data:", 
+        paste(unmatched_teams_in_picks, collapse = ", "), "\n")
+  }
+}
 ```
 
 ---
@@ -530,6 +597,7 @@ if (nrow(todays_picks) > 0) {
     )
   
   # 7. Save today's results to file (use underscores for easier CSV handling)
+  # This now correctly uses today_ct (which is skins_date) as the filename
   today_file <- file.path(history_dir, paste0(today_ct, ".csv"))
   todays_results %>%
     select(Date, Player, Team, Abbr, Pick, Expected_Skins = `Expected Skins`, Won_Game, Actual_Skins, Skins_Luck) %>%
@@ -709,6 +777,7 @@ if (nrow(todays_picks) > 0) {
 #| results: 'asis'
 
 # Create Yesterday's Head-to-Head Matchup Table
+# This correctly uses today_ct (which is skins_date) to find yesterday
 yesterday_ct <- today_ct - days(1)
 yesterday_file <- file.path(history_dir, paste0(yesterday_ct, ".csv"))
 
@@ -978,6 +1047,7 @@ write_csv(ytd_baseline, historical_file)
 
 # Store the baseline date so we only use NEW data going forward
 # FIX: Unconditionally write today's date to the baseline_date file.
+# This uses today_ct (which is skins_date)
 baseline_date_file <- file.path(history_dir, "baseline_date.txt")
 writeLines(as.character(today_ct), baseline_date_file)
 baseline_date <- as_date(readLines(baseline_date_file)[1])
