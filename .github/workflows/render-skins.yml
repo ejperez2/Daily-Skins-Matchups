@@ -1,3 +1,4 @@
+# Trivial comment added to force GitHub to re-register this workflow.
 name: Render and Publish Skins Page
 
 on:
@@ -68,7 +69,7 @@ jobs:
       - name: Install R Dependencies
         run: |
           R -e "install.packages('pacman', dependencies = TRUE)"
-          R -e "pacman::p_load(rvest, httr, dplyr, tidyr, stringr, lubridate, tibble, knitr, kableExtra, readr)"
+          R -e "pacman::p_load(rvest, httr, dplyr, tidyr, stringr, lubridate, tibble, knitr, kableExtra, readr, ggplot2)"
       
       - name: Create history directory
         run: |
@@ -95,4 +96,4 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-#
+
