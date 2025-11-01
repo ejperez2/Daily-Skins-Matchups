@@ -3,6 +3,7 @@ title: "Today's NBA Skins Picks"
 format:
   html:
     self-contained: true
+    theme: darkly
     grid:
       body-width: 1200px
     css: |
@@ -19,7 +20,7 @@ format:
 #| warning: false
 # Load all required packages for the whole document
 if (!require("pacman")) install.packages("pacman")
-pacman::p_load(rvest, httr, dplyr, tidyr, stringr, lubridate, tibble, knitr, kableExtra, readr)
+pacman::p_load(rvest, httr, dplyr, tidyr, stringr, lubridate, tibble, knitr, kableExtra, readr, ggplot2)
 
 # Create history directory - use relative path that works in both local and GitHub Actions
 history_dir <- "skins_history"
@@ -32,7 +33,7 @@ if (!dir.exists(history_dir)) {
 #| echo: false
 #| results: 'asis'
 ts <- format(Sys.time(), "%A, %B %d, %Y at %I:%M %p %Z", tz = "America/Chicago")
-cat(paste0("<p style='font-size:14px; color:#555;'><strong>Last updated:</strong> ", ts, "</p>"))
+cat(paste0("<p style='font-size:14px; color:#999;'><strong>Last updated:</strong> ", ts, "</p>"))
 ```
 
 This page shows the expected skins for today's NBA games, based on live odds.
@@ -46,7 +47,6 @@ This page shows the expected skins for today's NBA games, based on live odds.
 url <- paste0("https://www.sportsline.com/nba/odds/money-line/",
               "?t=", format(Sys.time(), "%Y%m%d%H%M%S"))
 googlebot_ua <- "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
-
 page_session <- rvest::session(url, httr::user_agent(googlebot_ua))
 html_content <- rvest::read_html(page_session)
 game_data_raw <- html_content %>% html_element("table") %>% html_table()
@@ -299,7 +299,7 @@ if (nrow(todays_picks) > 0) {
 
 ## Today's Results & Skins Luck
 
-This section scrapes `cleaningtheglass.com` for game results. Games that are final or in-progress will appear here.
+This section scrapes `plaintextsports.com/nba` for game results. 
 
 ```{r matchup_table}
 #| echo: false
@@ -309,74 +309,118 @@ This section scrapes `cleaningtheglass.com` for game results. Games that are fin
 # Create Head-to-Head Matchup Table
 if (nrow(todays_picks) > 0) {
   
-  # First, scrape results to check game status
-  url_scores <- paste0("https://cleaningtheglass.com/stats/games/?date=", results_date)
+  # Scrape plaintextsports.com for game results
+  url_scores <- "https://plaintextsports.com/nba/"
   page_scores <- read_html(url_scores)
-  all_tables <- page_scores %>% html_elements("table")
   
-  # Extract game results and status
-  matchup_game_results <- data.frame()
+  # Get all text
+  all_text <- page_scores %>%
+    html_element("body") %>%
+    html_text2()
   
-  for (i in 1:length(all_tables)) {
-    table_data <- all_tables[[i]] %>% html_table()
+  # Extract score boxes
+  all_lines <- strsplit(all_text, "\n")[[1]]
+  score_boxes <- all_lines[grepl("^\\+", all_lines)]
+  
+  # Parse game boxes
+  parse_game_box <- function(box) {
+    parts <- strsplit(box, "\\|")[[1]]
+    status <- str_trim(parts[2])
     
-    # Check if game is final
-    is_final <- FALSE
-    if (nrow(table_data) >= 3) {
-      status_row <- paste(unlist(table_data[3, ]), collapse = " ")
-      is_final <- grepl("Final", status_row, ignore.case = TRUE)
-    }
+    team1_line <- str_trim(parts[4])
+    team1_name <- str_extract(team1_line, "[A-Z]{2,3}")
+    team1_score <- suppressWarnings(as.numeric(str_extract(team1_line, "[0-9]+$")))
     
-    # Extract scores
-    if (ncol(table_data) >= 3) {
-      game_scores <- table_data %>%
-        select(Abbr = 2, PTS_Str = 3) %>%
-        mutate(
-          Abbr = as.character(Abbr),
-          PTS = suppressWarnings(as.numeric(as.character(PTS_Str)))
-        ) %>%
-        filter(!is.na(PTS), PTS > 0) %>%
-        select(Abbr, PTS) %>%
-        mutate(is_final = is_final)
-      
-      if (nrow(game_scores) > 0) {
-        matchup_game_results <- bind_rows(matchup_game_results, game_scores)
-      }
-    }
+    team2_line <- str_trim(parts[6])
+    team2_name <- str_extract(team2_line, "[A-Z]{2,3}")
+    team2_score <- suppressWarnings(as.numeric(str_extract(team2_line, "[0-9]+$")))
+    
+    is_final <- grepl("Final", status, fixed = TRUE)
+    
+    # Determine if game is in progress: contains Q1-Q4, Half, OT, or time with a colon
+    is_in_progress <- grepl("Q[1-4]|Half|OT|\\d+:\\d+", status) & !is_final
+    
+    data.frame(
+      Team1 = team1_name,
+      Team2 = team2_name,
+      Score1 = team1_score,
+      Score2 = team2_score,
+      Status = status,
+      Finished = is_final,
+      InProgress = is_in_progress,
+      stringsAsFactors = FALSE
+    )
   }
   
-  # Create wide format for game results (only final games)
-  matchup_results_wide <- matchup_game_results %>%
-    filter(is_final == TRUE) %>%
-    mutate(Game_ID = ceiling(row_number() / 2)) %>%
-    group_by(Game_ID) %>%
-    mutate(Team_Num = row_number()) %>%
-    ungroup() %>%
-    pivot_wider(
-      id_cols = Game_ID,
-      names_from = Team_Num,
-      values_from = c(Abbr, PTS)
-    )
+  # Parse all games
+  if (length(score_boxes) > 0) {
+    matchup_game_results <- bind_rows(lapply(score_boxes, parse_game_box))
+  } else {
+    matchup_game_results <- data.frame()
+  }
   
-  # Create Won_Game lookup
-  matchup_won_lookup <- data.frame(Abbr = character(), Won_Game = logical())
+  # Standardize abbreviations
+  team_replacements <- c(
+    "^GSW$" = "GS",
+    "^NOP$" = "NO",
+    "^NYK$" = "NY",
+    "^SAS$" = "SA",
+    "^WSH$" = "WAS"
+  )
   
-  if (nrow(matchup_results_wide) > 0) {
-    team_1 <- matchup_results_wide %>%
-      select(Abbr = Abbr_1, PTS = PTS_1, Opp_PTS = PTS_2) %>%
-      mutate(Won_Game = PTS > Opp_PTS)
+  if (nrow(matchup_game_results) > 0) {
+    matchup_game_results <- matchup_game_results %>%
+      mutate(
+        Team1 = str_replace_all(Team1, team_replacements),
+        Team2 = str_replace_all(Team2, team_replacements)
+      )
+  }
+  
+  # Create Won_Game lookup - only final games
+  matchup_won_lookup <- data.frame(Abbr = character(), Won_Game = logical(), stringsAsFactors = FALSE)
+  matchup_status_lookup <- data.frame(Abbr = character(), GameStatus = character(), stringsAsFactors = FALSE)
+  
+  if (nrow(matchup_game_results) > 0) {
+    # Won_Game lookup for finished games
+    finished_games <- matchup_game_results %>% filter(Finished == TRUE)
     
-    team_2 <- matchup_results_wide %>%
-      select(Abbr = Abbr_2, PTS = PTS_2, Opp_PTS = PTS_1) %>%
-      mutate(Won_Game = PTS > Opp_PTS)
+    if (nrow(finished_games) > 0) {
+      team_1 <- finished_games %>%
+        select(Abbr = Team1, PTS = Score1, Opp_PTS = Score2) %>%
+        mutate(Won_Game = PTS > Opp_PTS)
+      
+      team_2 <- finished_games %>%
+        select(Abbr = Team2, PTS = Score2, Opp_PTS = Score1) %>%
+        mutate(Won_Game = PTS > Opp_PTS)
+      
+      matchup_won_lookup <- bind_rows(team_1, team_2) %>%
+        select(Abbr, Won_Game)
+    }
     
-    matchup_won_lookup <- bind_rows(team_1, team_2) %>%
-      select(Abbr, Won_Game)
+    # Status lookup for all games
+    all_games_status <- matchup_game_results %>%
+      mutate(
+        GameStatus = case_when(
+          Finished == TRUE ~ "Final",
+          InProgress == TRUE ~ "In Progress",
+          TRUE ~ "Not Started"
+        )
+      )
+    
+    team_1_status <- all_games_status %>%
+      select(Abbr = Team1, GameStatus)
+    
+    team_2_status <- all_games_status %>%
+      select(Abbr = Team2, GameStatus)
+    
+    matchup_status_lookup <- bind_rows(team_1_status, team_2_status) %>%
+      distinct()
   }
   
   # Build the matchup table - ONE ROW PER GAME
   matchup_prep <- todays_picks %>%
     left_join(matchup_won_lookup, by = "Abbr") %>%
+    left_join(matchup_status_lookup, by = "Abbr") %>%
     mutate(
       Won_Skin = case_when(
         Won_Game == TRUE & Pick == "W" ~ TRUE,
@@ -384,7 +428,8 @@ if (nrow(todays_picks) > 0) {
         is.na(Won_Game) ~ NA,
         TRUE ~ FALSE
       ),
-      Game_Status = ifelse(is.na(Won_Game), "Not Started", "Final")
+      # Use the actual game status from scraping, default to "Not Started" if no match
+      Game_Status = if_else(is.na(GameStatus), "Not Started", GameStatus)
     ) %>%
     arrange(game_id)
   
@@ -407,17 +452,17 @@ if (nrow(todays_picks) > 0) {
       # Format player names with color highlighting using format="html"
       Player_1_Display = case_when(
         Status == "Final" & !is.na(Won_Skin_1) & Won_Skin_1 ~ 
-          cell_spec(Player_1, background = "#90EE90", bold = TRUE, format = "html"),
+          cell_spec(Player_1, background = "#90EE90", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         Status == "Final" & !is.na(Won_Skin_1) & !Won_Skin_1 ~ 
-          cell_spec(Player_1, background = "#FFB6C6", bold = TRUE, format = "html"),
+          cell_spec(Player_1, background = "#FFB6C6", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         TRUE ~ Player_1
       ),
       Player_2_Display = case_when(
         is.na(Player_2) ~ "",
         Status == "Final" & !is.na(Won_Skin_2) & Won_Skin_2 ~ 
-          cell_spec(Player_2, background = "#90EE90", bold = TRUE, format = "html"),
+          cell_spec(Player_2, background = "#90EE90", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         Status == "Final" & !is.na(Won_Skin_2) & !Won_Skin_2 ~ 
-          cell_spec(Player_2, background = "#FFB6C6", bold = TRUE, format = "html"),
+          cell_spec(Player_2, background = "#FFB6C6", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         TRUE ~ Player_2
       ),
       # Add checkmarks for Won_Skin status
@@ -473,73 +518,101 @@ if (nrow(todays_picks) > 0) {
 # Only process results if we have games today
 if (nrow(todays_picks) > 0) {
   
-  # 1. Scrape the Live Game Data with date parameter
-  # Use results_date to capture late games that finish after midnight
-  url_scores <- paste0("https://cleaningtheglass.com/stats/games/?date=", results_date)
+  # 1. Scrape plaintextsports.com for live game data
+  url_scores <- "https://plaintextsports.com/nba/"
   page_scores <- read_html(url_scores)
   
-  # 2. Get all tables (each table contains one game)
-  all_tables <- page_scores %>% html_elements("table")
+  # Get all text from the body
+  all_text <- page_scores %>%
+    html_element("body") %>%
+    html_text2()
   
-  # 3. Extract scores from all tables and track game status
-  all_game_results <- data.frame()
+  # 2. Extract Game Blocks - Split into lines and get score boxes
+  all_lines <- strsplit(all_text, "\n")[[1]]
+  score_boxes <- all_lines[grepl("^\\+", all_lines)]
   
-  for (i in 1:length(all_tables)) {
-    table_data <- all_tables[[i]] %>% html_table()
+  # 3. Parse a single game box
+  parse_game_box <- function(box) {
+    # Split by "|" character
+    parts <- strsplit(box, "\\|")[[1]]
     
-    # Check game status from row 3 (status row)
-    # "Final" = completed, "Live" = in-progress, "Game Preview" = unstarted
-    is_final <- FALSE
-    if (nrow(table_data) >= 3) {
-      status_row <- paste(unlist(table_data[3, ]), collapse = " ")
-      is_final <- grepl("Final", status_row, ignore.case = TRUE)
-    }
+    # Extract status, teams, and scores
+    status <- str_trim(parts[2])
     
-    # Try to extract game scores (team abbr in col 2, points in col 3)
-    if (ncol(table_data) >= 3) {
-      game_scores <- table_data %>%
-        select(Abbr = 2, PTS_Str = 3) %>%
-        mutate(
-          Abbr = as.character(Abbr),
-          PTS = suppressWarnings(as.numeric(as.character(PTS_Str)))
-        ) %>%
-        filter(!is.na(PTS), PTS > 0) %>%
-        select(Abbr, PTS) %>%
-        mutate(is_final = is_final)
-      
-      if (nrow(game_scores) > 0) {
-        all_game_results <- bind_rows(all_game_results, game_scores)
-      }
-    }
+    # Team 1
+    team1_line <- str_trim(parts[4])
+    team1_name <- str_extract(team1_line, "[A-Z]{2,3}")
+    team1_score <- suppressWarnings(as.numeric(str_extract(team1_line, "[0-9]+$")))
+    
+    # Team 2
+    team2_line <- str_trim(parts[6])
+    team2_name <- str_extract(team2_line, "[A-Z]{2,3}")
+    team2_score <- suppressWarnings(as.numeric(str_extract(team2_line, "[0-9]+$")))
+    
+    # Determine if final
+    is_final <- grepl("Final", status, fixed = TRUE)
+    
+    # Determine if game is in progress
+    is_in_progress <- grepl("Q[1-4]|Half|OT|\\d+:\\d+", status) & !is_final
+    
+    # Return data frame
+    data.frame(
+      Team1 = team1_name,
+      Team2 = team2_name,
+      Score1 = team1_score,
+      Score2 = team2_score,
+      Status = status,
+      Finished = is_final,
+      InProgress = is_in_progress,
+      stringsAsFactors = FALSE
+    )
   }
   
-  # 4. Clean and Reshape the game results - ONLY INCLUDE FINAL GAMES
-  game_results_wide <- all_game_results %>%
-    filter(is_final == TRUE) %>%
-    mutate(Game_ID = ceiling(row_number() / 2)) %>%
-    group_by(Game_ID) %>%
-    mutate(Team_Num = row_number()) %>%
-    ungroup() %>%
-    pivot_wider(
-      id_cols = Game_ID,
-      names_from = Team_Num,
-      values_from = c(Abbr, PTS)
-    )
+  # 4. Parse all game boxes
+  if (length(score_boxes) > 0) {
+    all_game_results <- bind_rows(lapply(score_boxes, parse_game_box))
+  } else {
+    all_game_results <- data.frame()
+  }
   
-  # 5. Create a final 'Won_Game' lookup table
-  final_team_results <- data.frame(Abbr = character(), Won_Game = logical())
+  # 5. Standardize team abbreviations to match draft_data
+  team_replacements <- c(
+    "^GSW$" = "GS",
+    "^NOP$" = "NO",
+    "^NYK$" = "NY",
+    "^SAS$" = "SA",
+    "^WSH$" = "WAS"
+  )
   
-  if (nrow(game_results_wide) > 0) {
-    team_1_results <- game_results_wide %>%
-      select(Abbr = Abbr_1, PTS = PTS_1, Opp_PTS = PTS_2) %>%
-      mutate(Won_Game = PTS > Opp_PTS)
+  # Apply standardization
+  if (nrow(all_game_results) > 0) {
+    all_game_results <- all_game_results %>%
+      mutate(
+        Team1 = str_replace_all(Team1, team_replacements),
+        Team2 = str_replace_all(Team2, team_replacements)
+      )
+  }
+  
+  # 6. Create Won_Game lookup - only for finished games
+  final_team_results <- data.frame(Abbr = character(), Won_Game = logical(), stringsAsFactors = FALSE)
+  
+  if (nrow(all_game_results) > 0) {
+    finished_games <- all_game_results %>% filter(Finished == TRUE)
     
-    team_2_results <- game_results_wide %>%
-      select(Abbr = Abbr_2, PTS = PTS_2, Opp_PTS = PTS_1) %>%
-      mutate(Won_Game = PTS > Opp_PTS)
-    
-    final_team_results <- bind_rows(team_1_results, team_2_results) %>%
-      select(Abbr, Won_Game)
+    if (nrow(finished_games) > 0) {
+      # Team 1 results
+      team1_results <- finished_games %>%
+        select(Abbr = Team1, PTS = Score1, Opp_PTS = Score2) %>%
+        mutate(Won_Game = PTS > Opp_PTS)
+      
+      # Team 2 results
+      team2_results <- finished_games %>%
+        select(Abbr = Team2, PTS = Score2, Opp_PTS = Score1) %>%
+        mutate(Won_Game = PTS > Opp_PTS)
+      
+      final_team_results <- bind_rows(team1_results, team2_results) %>%
+        select(Abbr, Won_Game)
+    }
   }
   
   # 6. Create todays_results with actual outcomes
@@ -624,6 +697,7 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
 #| echo: false
 #| message: false
 #| warning: false
+#| results: 'asis'
 
 # Create Yesterday's Head-to-Head Matchup Table
 yesterday_ct <- today_ct - days(1)
@@ -639,65 +713,90 @@ if (file.exists(yesterday_file)) {
     
     if (has_incomplete_data) {
       # CSV was saved before all games finished - scrape to get complete results
-      url_scores_yesterday <- paste0("https://cleaningtheglass.com/stats/games/?date=", yesterday_ct)
+      url_scores_yesterday <- "https://plaintextsports.com/nba/"
       page_scores_yesterday <- read_html(url_scores_yesterday)
-      all_tables_yesterday <- page_scores_yesterday %>% html_elements("table")
       
-      # Extract game results
-      yesterday_game_results <- data.frame()
+      # Get all text
+      all_text_yesterday <- page_scores_yesterday %>%
+        html_element("body") %>%
+        html_text2()
       
-      for (i in 1:length(all_tables_yesterday)) {
-        table_data <- all_tables_yesterday[[i]] %>% html_table()
+      # Extract score boxes
+      all_lines_yesterday <- strsplit(all_text_yesterday, "\n")[[1]]
+      score_boxes_yesterday <- all_lines_yesterday[grepl("^\\+", all_lines_yesterday)]
+      
+      # Parse game boxes
+      parse_game_box <- function(box) {
+        parts <- strsplit(box, "\\|")[[1]]
+        status <- str_trim(parts[2])
         
-        is_final <- FALSE
-        if (nrow(table_data) >= 3) {
-          status_row <- paste(unlist(table_data[3, ]), collapse = " ")
-          is_final <- grepl("Final", status_row, ignore.case = TRUE)
-        }
+        team1_line <- str_trim(parts[4])
+        team1_name <- str_extract(team1_line, "[A-Z]{2,3}")
+        team1_score <- suppressWarnings(as.numeric(str_extract(team1_line, "[0-9]+$")))
         
-        if (ncol(table_data) >= 3) {
-          game_scores <- table_data %>%
-            select(Abbr = 2, PTS_Str = 3) %>%
-            mutate(
-              Abbr = as.character(Abbr),
-              PTS = suppressWarnings(as.numeric(as.character(PTS_Str)))
-            ) %>%
-            filter(!is.na(PTS), PTS > 0) %>%
-            select(Abbr, PTS) %>%
-            mutate(is_final = is_final)
-          
-          if (nrow(game_scores) > 0) {
-            yesterday_game_results <- bind_rows(yesterday_game_results, game_scores)
-          }
-        }
+        team2_line <- str_trim(parts[6])
+        team2_name <- str_extract(team2_line, "[A-Z]{2,3}")
+        team2_score <- suppressWarnings(as.numeric(str_extract(team2_line, "[0-9]+$")))
+        
+        is_final <- grepl("Final", status, fixed = TRUE)
+        
+        # Determine if game is in progress
+        is_in_progress <- grepl("Q[1-4]|Half|OT|\\d+:\\d+", status) & !is_final
+        
+        data.frame(
+          Team1 = team1_name,
+          Team2 = team2_name,
+          Score1 = team1_score,
+          Score2 = team2_score,
+          Status = status,
+          Finished = is_final,
+          InProgress = is_in_progress,
+          stringsAsFactors = FALSE
+        )
+      }
+      
+      # Parse all games
+      if (length(score_boxes_yesterday) > 0) {
+        yesterday_game_results <- bind_rows(lapply(score_boxes_yesterday, parse_game_box))
+      } else {
+        yesterday_game_results <- data.frame()
+      }
+      
+      # Standardize abbreviations
+      team_replacements <- c(
+        "^GSW$" = "GS",
+        "^NOP$" = "NO",
+        "^NYK$" = "NY",
+        "^SAS$" = "SA",
+        "^WSH$" = "WAS"
+      )
+      
+      if (nrow(yesterday_game_results) > 0) {
+        yesterday_game_results <- yesterday_game_results %>%
+          mutate(
+            Team1 = str_replace_all(Team1, team_replacements),
+            Team2 = str_replace_all(Team2, team_replacements)
+          )
       }
       
       # Create Won_Game lookup from scraped data
-      yesterday_results_wide <- yesterday_game_results %>%
-        filter(is_final == TRUE) %>%
-        mutate(Game_ID = ceiling(row_number() / 2)) %>%
-        group_by(Game_ID) %>%
-        mutate(Team_Num = row_number()) %>%
-        ungroup() %>%
-        pivot_wider(
-          id_cols = Game_ID,
-          names_from = Team_Num,
-          values_from = c(Abbr, PTS)
-        )
+      scraped_won_lookup <- data.frame(Abbr = character(), Won_Game_Scraped = logical(), stringsAsFactors = FALSE)
       
-      scraped_won_lookup <- data.frame(Abbr = character(), Won_Game_Scraped = logical())
-      
-      if (nrow(yesterday_results_wide) > 0) {
-        team_1 <- yesterday_results_wide %>%
-          select(Abbr = Abbr_1, PTS = PTS_1, Opp_PTS = PTS_2) %>%
-          mutate(Won_Game_Scraped = PTS > Opp_PTS)
+      if (nrow(yesterday_game_results) > 0) {
+        finished_games <- yesterday_game_results %>% filter(Finished == TRUE)
         
-        team_2 <- yesterday_results_wide %>%
-          select(Abbr = Abbr_2, PTS = PTS_2, Opp_PTS = PTS_1) %>%
-          mutate(Won_Game_Scraped = PTS > Opp_PTS)
-        
-        scraped_won_lookup <- bind_rows(team_1, team_2) %>%
-          select(Abbr, Won_Game_Scraped)
+        if (nrow(finished_games) > 0) {
+          team_1 <- finished_games %>%
+            select(Abbr = Team1, PTS = Score1, Opp_PTS = Score2) %>%
+            mutate(Won_Game_Scraped = PTS > Opp_PTS)
+          
+          team_2 <- finished_games %>%
+            select(Abbr = Team2, PTS = Score2, Opp_PTS = Score1) %>%
+            mutate(Won_Game_Scraped = PTS > Opp_PTS)
+          
+          scraped_won_lookup <- bind_rows(team_1, team_2) %>%
+            select(Abbr, Won_Game_Scraped)
+        }
       }
       
       # Merge scraped data with CSV, preferring CSV but using scraped for NA values
@@ -747,17 +846,17 @@ if (file.exists(yesterday_file)) {
         # Format player names with color highlighting using format="html"
         Player_1_Display = case_when(
           !is.na(Won_Skin_1) & Won_Skin_1 == TRUE ~ 
-            cell_spec(Player_1, background = "#90EE90", bold = TRUE, format = "html"),
+            cell_spec(Player_1, background = "#90EE90", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
           !is.na(Won_Skin_1) & Won_Skin_1 == FALSE ~ 
-            cell_spec(Player_1, background = "#FFB6C6", bold = TRUE, format = "html"),
+            cell_spec(Player_1, background = "#FFB6C6", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
           TRUE ~ Player_1
         ),
         Player_2_Display = case_when(
           is.na(Player_2) ~ "",
           !is.na(Won_Skin_2) & Won_Skin_2 == TRUE ~ 
-            cell_spec(Player_2, background = "#90EE90", bold = TRUE, format = "html"),
+            cell_spec(Player_2, background = "#90EE90", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
           !is.na(Won_Skin_2) & Won_Skin_2 == FALSE ~ 
-            cell_spec(Player_2, background = "#FFB6C6", bold = TRUE, format = "html"),
+            cell_spec(Player_2, background = "#FFB6C6", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
           TRUE ~ Player_2
         ),
         # Add checkmarks for Won_Skin status
@@ -794,14 +893,41 @@ if (file.exists(yesterday_file)) {
     
     # Create the table with HTML formatting enabled
     if (nrow(yesterday_matchup_table) > 0) {
-      knitr::kable(
+      print(knitr::kable(
         yesterday_matchup_table,
         align = 'c',
         caption = paste0(format(yesterday_ct, "%B %d, %Y"), " - Head-to-Head Matchups"),
         escape = FALSE,  # Allow HTML formatting from cell_spec
         format = "html"  # Explicitly set format to HTML
       ) %>%
-        kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+        kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE))
+      
+      # Add player summary for yesterday
+      yesterday_player_summary <- yesterday_with_game %>%
+        group_by(Player) %>%
+        summarise(
+          Total_Expected_Skins = sum(Expected_Skins, na.rm = TRUE),
+          Total_Actual_Skins = sum(Actual_Skins, na.rm = TRUE),
+          Skins_Luck_Total = sum(Skins_Luck, na.rm = TRUE),
+          .groups = 'drop'
+        ) %>%
+        rename(
+          `Total Expected Skins` = Total_Expected_Skins,
+          `Total Actual Skins` = Total_Actual_Skins,
+          `Skins Luck` = Skins_Luck_Total
+        ) %>%
+        arrange(desc(`Skins Luck`))
+      
+      cat("<br>")
+      print(knitr::kable(
+        yesterday_player_summary,
+        digits = 1,
+        align = 'c',
+        caption = paste0(format(yesterday_ct, "%B %d"), " - Player Summary")
+      ) %>%
+        kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+        column_spec(4, bold = TRUE))
+      
     } else {
       cat(paste0("No completed games found for ", format(yesterday_ct, "%A, %B %d, %Y"), "."))
     }
@@ -813,111 +939,129 @@ if (file.exists(yesterday_file)) {
 }
 ```
 
-```{r yesterday_results}
+---
+
+## Year-to-Date Cumulative Stats
+
+```{r ytd_setup}
 #| echo: false
 #| message: false
 #| warning: false
 
-yesterday_ct <- today_ct - days(1)
-yesterday_file <- file.path(history_dir, paste0(yesterday_ct, ".csv"))
+# Create/update historical baseline data
+historical_file <- file.path(history_dir, "ytd_baseline.csv")
 
-if (file.exists(yesterday_file)) {
-  yesterday_data <- read_csv(yesterday_file, show_col_types = FALSE)
-  
-  # Yesterday's Completed Games
-  yesterday_completed <- yesterday_data %>%
-    filter(!is.na(Won_Game)) %>%
-    select(
-      Player,
-      Team,
-      Pick,
-      Won_Game,
-      Actual_Skins,
-      Expected_Skins,
-      Skins_Luck
-    ) %>%
-    rename(
-      `Won Game?` = Won_Game,
-      `Actual Skins` = Actual_Skins,
-      `Expected Skins` = Expected_Skins,
-      `Skins Luck` = Skins_Luck
-    ) %>%
-    arrange(Player, Team)
-  
-  if (nrow(yesterday_completed) > 0) {
-    cat(paste0("<h3>", format(yesterday_ct, "%A, %B %d, %Y"), " - Skins Results</h3>"))
-    
-    knitr::kable(yesterday_completed, digits = 1, align = 'c') %>%
-      kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-      column_spec(c(5, 7), bold = TRUE)
-    
-    # Yesterday's Player Summary
-    yesterday_player_summary <- yesterday_data %>%
-      group_by(Player) %>%
-      summarise(
-        Total_Expected_Skins = sum(Expected_Skins, na.rm = TRUE),
-        Total_Actual_Skins = sum(Actual_Skins, na.rm = TRUE),
-        Skins_Luck_Total = sum(Skins_Luck, na.rm = TRUE),
-        .groups = 'drop'
-      ) %>%
-      rename(
-        `Total Expected Skins` = Total_Expected_Skins,
-        `Total Actual Skins` = Total_Actual_Skins,
-        `Skins Luck` = Skins_Luck_Total
-      ) %>%
-      arrange(desc(`Skins Luck`))
-    
-    cat("<br>")
-    knitr::kable(
-      yesterday_player_summary,
-      digits = 1,
-      align = 'c',
-      caption = paste0(format(yesterday_ct, "%B %d"), " - Player Summary")
-    ) %>%
-      kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-      column_spec(4, bold = TRUE)
-  } else {
-    cat(paste0("No completed games found for ", format(yesterday_ct, "%A, %B %d, %Y"), "."))
-  }
-} else {
-  cat(paste0("No data available for ", format(yesterday_ct, "%A, %B %d, %Y"), "."))
+# ALWAYS use the correct baseline data provided by user
+# This overwrites any old data and ensures we start fresh
+ytd_baseline <- tribble(
+  ~Player, ~Games, ~Total_Expected_Skins, ~Total_Actual_Skins, ~Cumulative_Skins_Luck,
+  "Adam", 24, 15.4, 14, -1.4,
+  "Eristeo", 22, 16.9, 17, 0.1,
+  "Kenneth", 26, 16.3, 13, -3.3,
+  "Brian", 25, 14.9, 18, 3.1,
+  "Thomas", 23, 16.1, 12, -4.1,
+  "Matt", 24, 16.5, 18, 1.5
+)
+
+# Save/overwrite the baseline file
+write_csv(ytd_baseline, historical_file)
+
+# Store the baseline date so we only use NEW data going forward
+baseline_date_file <- file.path(history_dir, "baseline_date.txt")
+if (!file.exists(baseline_date_file)) {
+  writeLines(as.character(today_ct), baseline_date_file)
 }
+baseline_date <- as_date(readLines(baseline_date_file)[1])
 ```
-
----
-
-## Year-to-Date Cumulative Stats (work in progress)
 
 ```{r ytd_cumulative}
 #| echo: false
 #| message: false
 #| warning: false
 
-# Read all historical files
-all_files <- list.files(history_dir, pattern = "\\.csv$", full.names = TRUE)
+# Read only daily CSV files from baseline date forward (not before!)
+all_files <- list.files(history_dir, pattern = "^\\d{4}-\\d{2}-\\d{2}\\.csv$", full.names = TRUE)
 
 if (length(all_files) > 0) {
-  # Read and combine all historical data using base R
-  all_history <- bind_rows(lapply(all_files, function(f) read_csv(f, show_col_types = FALSE)))
+  # Filter files: only include dates >= baseline_date
+  valid_files <- all_files[sapply(all_files, function(f) {
+    file_date <- as_date(str_extract(basename(f), "\\d{4}-\\d{2}-\\d{2}"))
+    return(file_date >= baseline_date)
+  })]
   
-  # Filter for current year only
-  current_year <- year(today_ct)
-  ytd_data <- all_history %>%
-    filter(year(Date) == current_year, !is.na(Actual_Skins))
-  
-  if (nrow(ytd_data) > 0) {
-    ytd_summary <- ytd_data %>%
-      group_by(Player) %>%
-      summarise(
-        Games = n(),
-        Total_Expected_Skins = sum(Expected_Skins, na.rm = TRUE),
-        Total_Actual_Skins = sum(Actual_Skins, na.rm = TRUE),
-        Cumulative_Skins_Luck = sum(Skins_Luck, na.rm = TRUE),
-        .groups = 'drop'
+  if (length(valid_files) > 0) {
+    # Read and combine only NEW daily data (from baseline date forward)
+    all_history <- bind_rows(lapply(valid_files, function(f) read_csv(f, show_col_types = FALSE)))
+    
+    # Filter for current year only and completed games
+    current_year <- year(today_ct)
+    ytd_data <- all_history %>%
+      filter(year(Date) == current_year, !is.na(Actual_Skins))
+    
+    if (nrow(ytd_data) > 0) {
+      # Calculate new stats from daily data (only NEW games)
+      ytd_new_data <- ytd_data %>%
+        group_by(Player) %>%
+        summarise(
+          Games = n(),
+          Total_Expected_Skins = sum(Expected_Skins, na.rm = TRUE),
+          Total_Actual_Skins = sum(Actual_Skins, na.rm = TRUE),
+          Cumulative_Skins_Luck = sum(Skins_Luck, na.rm = TRUE),
+          .groups = 'drop'
+        )
+      
+      # Combine baseline with new data
+      ytd_summary <- ytd_baseline %>%
+        full_join(ytd_new_data, by = "Player", suffix = c("_baseline", "_new")) %>%
+        mutate(
+          Games = coalesce(Games_baseline, 0) + coalesce(Games_new, 0),
+          Total_Expected_Skins = coalesce(Total_Expected_Skins_baseline, 0) + coalesce(Total_Expected_Skins_new, 0),
+          Total_Actual_Skins = coalesce(Total_Actual_Skins_baseline, 0) + coalesce(Total_Actual_Skins_new, 0),
+          Cumulative_Skins_Luck = coalesce(Cumulative_Skins_Luck_baseline, 0) + coalesce(Cumulative_Skins_Luck_new, 0)
+        ) %>%
+        select(Player, Games, Total_Expected_Skins, Total_Actual_Skins, Cumulative_Skins_Luck) %>%
+        mutate(Avg_Skins_Luck_per_Game = Cumulative_Skins_Luck / Games) %>%
+        rename(
+          `Total Expected Skins` = Total_Expected_Skins,
+          `Total Actual Skins` = Total_Actual_Skins,
+          `Cumulative Skins Luck` = Cumulative_Skins_Luck,
+          `Avg Skins Luck per Game` = Avg_Skins_Luck_per_Game
+        ) %>%
+        arrange(desc(`Cumulative Skins Luck`))
+      
+      knitr::kable(
+        ytd_summary,
+        digits = 1,
+        align = 'c',
+        caption = paste0(current_year, " Year-to-Date Cumulative Stats")
       ) %>%
-      mutate(
-        Avg_Skins_Luck_per_Game = Cumulative_Skins_Luck / Games
+        kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+        column_spec(5, bold = TRUE)
+    } else {
+      # No new data yet, just show baseline
+      ytd_summary <- ytd_baseline %>%
+        mutate(Avg_Skins_Luck_per_Game = Cumulative_Skins_Luck / Games) %>%
+        rename(
+          `Total Expected Skins` = Total_Expected_Skins,
+          `Total Actual Skins` = Total_Actual_Skins,
+          `Cumulative Skins Luck` = Cumulative_Skins_Luck,
+          `Avg Skins Luck per Game` = Avg_Skins_Luck_per_Game
+        ) %>%
+        arrange(desc(`Cumulative Skins Luck`))
+      
+      knitr::kable(
+        ytd_summary,
+        digits = 1,
+        align = 'c',
+        caption = paste0(current_year, " Year-to-Date Cumulative Stats")
       ) %>%
+        kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+        column_spec(5, bold = TRUE)
+    }
+  } else {
+    # No valid files yet, just show baseline
+    ytd_summary <- ytd_baseline %>%
+      mutate(Avg_Skins_Luck_per_Game = Cumulative_Skins_Luck / Games) %>%
       rename(
         `Total Expected Skins` = Total_Expected_Skins,
         `Total Actual Skins` = Total_Actual_Skins,
@@ -930,15 +1074,133 @@ if (length(all_files) > 0) {
       ytd_summary,
       digits = 1,
       align = 'c',
-      caption = paste0(current_year, " Year-to-Date Cumulative Stats")
+      caption = paste0(current_year, " Year-to-Date Cumulative Stats (Baseline)")
     ) %>%
       kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
       column_spec(5, bold = TRUE)
-  } else {
-    cat("No completed games in year-to-date history.")
   }
 } else {
-  cat("No historical data available yet.")
+  # No daily files yet, just show baseline
+  ytd_summary <- ytd_baseline %>%
+    mutate(Avg_Skins_Luck_per_Game = Cumulative_Skins_Luck / Games) %>%
+    rename(
+      `Total Expected Skins` = Total_Expected_Skins,
+      `Total Actual Skins` = Total_Actual_Skins,
+      `Cumulative Skins Luck` = Cumulative_Skins_Luck,
+      `Avg Skins Luck per Game` = Avg_Skins_Luck_per_Game
+    ) %>%
+    arrange(desc(`Cumulative Skins Luck`))
+  
+  knitr::kable(
+    ytd_summary,
+    digits = 1,
+    align = 'c',
+    caption = paste0(current_year, " Year-to-Date Cumulative Stats (Baseline)")
+  ) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+    column_spec(5, bold = TRUE)
 }
 ```
 
+```{r ytd_charts}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-width: 10
+#| fig-height: 6
+
+# Only generate charts if we have NEW data (from baseline date forward)
+if (length(all_files) > 0) {
+  # Filter files: only include dates >= baseline_date
+  valid_files <- all_files[sapply(all_files, function(f) {
+    file_date <- as_date(str_extract(basename(f), "\\d{4}-\\d{2}-\\d{2}"))
+    return(file_date >= baseline_date)
+  })]
+  
+  if (length(valid_files) > 0) {
+    # Read only NEW daily data
+    all_history <- bind_rows(lapply(valid_files, function(f) read_csv(f, show_col_types = FALSE)))
+    
+    current_year <- year(today_ct)
+    ytd_data <- all_history %>%
+      filter(year(Date) == current_year, !is.na(Actual_Skins))
+    
+    if (nrow(ytd_data) > 0) {
+      # Prepare data for time series charts
+      # Calculate cumulative stats by date for each player
+      daily_cumulative <- ytd_data %>%
+        arrange(Player, Date) %>%
+        group_by(Player) %>%
+        mutate(
+          Cumulative_Expected = cumsum(Expected_Skins),
+          Cumulative_Actual = cumsum(Actual_Skins),
+          Cumulative_Luck = cumsum(Skins_Luck)
+        ) %>%
+        ungroup()
+      
+      # Add baseline as the starting point (one day before first NEW data)
+      baseline_start <- ytd_baseline %>%
+        mutate(
+          Date = min(ytd_data$Date) - days(1),  # Day before first NEW recorded data
+          Cumulative_Expected = Total_Expected_Skins,
+          Cumulative_Actual = Total_Actual_Skins,
+          Cumulative_Luck = Cumulative_Skins_Luck
+        ) %>%
+        select(Player, Date, Cumulative_Expected, Cumulative_Actual, Cumulative_Luck)
+      
+      # Combine baseline with daily data
+      chart_data <- daily_cumulative %>%
+        select(Player, Date, Cumulative_Expected, Cumulative_Actual, Cumulative_Luck) %>%
+        bind_rows(baseline_start) %>%
+        arrange(Player, Date)
+      
+      # Chart 1: Cumulative Skins Luck Over Time
+      p1 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Luck, color = Player, group = Player)) +
+        geom_line(size = 1.2) +
+        geom_point(size = 2) +
+        geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+        labs(
+          title = "Cumulative Skins Luck Over Time",
+          x = "Date",
+          y = "Cumulative Skins Luck",
+          color = "Player"
+        ) +
+        theme_minimal() +
+        theme(
+          plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+          legend.position = "bottom"
+        ) +
+        scale_color_brewer(palette = "Set2")
+      
+      print(p1)
+      
+      cat("\n\n")
+      
+      # Chart 2: Total Expected Skins Over Time
+      p2 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Expected, color = Player, group = Player)) +
+        geom_line(size = 1.2) +
+        geom_point(size = 2) +
+        labs(
+          title = "Total Expected Skins Over Time",
+          x = "Date",
+          y = "Cumulative Expected Skins",
+          color = "Player"
+        ) +
+        theme_minimal() +
+        theme(
+          plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+          legend.position = "bottom"
+        ) +
+        scale_color_brewer(palette = "Set2")
+      
+      print(p2)
+    } else {
+      cat("Not enough data yet to generate time series charts. Charts will appear after tonight's games are completed.")
+    }
+  } else {
+    cat("Not enough data yet to generate time series charts. Charts will appear after tonight's games are completed.")
+  }
+} else {
+  cat("Not enough data yet to generate time series charts. Charts will appear after tonight's games are completed.")
+}
+```
