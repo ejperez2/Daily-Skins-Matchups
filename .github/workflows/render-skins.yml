@@ -24,7 +24,7 @@ on:
     - cron: '0 5 * * *'   # 12:00 AM CDT
     - cron: '30 5 * * *'  # 12:30 AM CDT
     - cron: '0 6 * * *'   #  1:00 AM CDT
-    - cron: '30 6 * * *'  #  1:30 AM CDT
+  #  - cron: '30 6 * * *'  #  1:30 AM CDT
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
