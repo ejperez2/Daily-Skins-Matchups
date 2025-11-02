@@ -1013,9 +1013,13 @@ ytd_baseline <- tribble(
 # Save/overwrite the baseline file
 write_csv(ytd_baseline, historical_file)
 
-# Store the baseline date so we only use NEW data going forward
+# CRITICAL FIX: Only write baseline_date.txt if it doesn't exist
+# This preserves the original baseline date across all runs
 baseline_date_file <- file.path(history_dir, "baseline_date.txt")
-writeLines(as.character(today_ct), baseline_date_file)
+if (!file.exists(baseline_date_file)) {
+  # Only set baseline on first run (or if file is missing)
+  writeLines(as.character(today_ct), baseline_date_file)
+}
 baseline_date <- as_date(readLines(baseline_date_file)[1])
 ```
 
@@ -1076,9 +1080,29 @@ if (nrow(ytd_data) > 0) {
     ) %>%
     arrange(desc(`Cumulative Skins Luck`))
   
-  knitr::kable(ytd_summary, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats")) %>%
+  # Add Total row
+  total_games <- sum(ytd_summary$Games)
+  total_expected <- sum(ytd_summary$`Total Expected Skins`)
+  total_actual <- sum(ytd_summary$`Total Actual Skins`)
+  total_luck <- sum(ytd_summary$`Cumulative Skins Luck`)
+  weighted_avg_luck <- if_else(total_games == 0, 0, total_luck / total_games)
+  
+  total_row <- data.frame(
+    Player = "TOTAL",
+    Games = total_games,
+    `Total Expected Skins` = total_expected,
+    `Total Actual Skins` = total_actual,
+    `Cumulative Skins Luck` = total_luck,
+    `Avg Skins Luck per Game` = weighted_avg_luck,
+    check.names = FALSE
+  )
+  
+  ytd_summary_with_total <- bind_rows(ytd_summary, total_row)
+  
+  knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats")) %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(5, bold = TRUE)
+    column_spec(5, bold = TRUE) %>%
+    row_spec(nrow(ytd_summary_with_total), bold = TRUE, background = "#444444")
 
 } else {
   ytd_summary <- ytd_baseline %>%
@@ -1088,10 +1112,30 @@ if (nrow(ytd_data) > 0) {
       `Cumulative Skins Luck` = Cumulative_Skins_Luck, `Avg Skins Luck per Game` = Avg_Skins_Luck_per_Game
     ) %>%
     arrange(desc(`Cumulative Skins Luck`))
+  
+  # Add Total row for baseline
+  total_games <- sum(ytd_summary$Games)
+  total_expected <- sum(ytd_summary$`Total Expected Skins`)
+  total_actual <- sum(ytd_summary$`Total Actual Skins`)
+  total_luck <- sum(ytd_summary$`Cumulative Skins Luck`)
+  weighted_avg_luck <- if_else(total_games == 0, 0, total_luck / total_games)
+  
+  total_row <- data.frame(
+    Player = "TOTAL",
+    Games = total_games,
+    `Total Expected Skins` = total_expected,
+    `Total Actual Skins` = total_actual,
+    `Cumulative Skins Luck` = total_luck,
+    `Avg Skins Luck per Game` = weighted_avg_luck,
+    check.names = FALSE
+  )
+  
+  ytd_summary_with_total <- bind_rows(ytd_summary, total_row)
     
-  knitr::kable(ytd_summary, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats (Baseline)")) %>%
+  knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats (Baseline)")) %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(5, bold = TRUE)
+    column_spec(5, bold = TRUE) %>%
+    row_spec(nrow(ytd_summary_with_total), bold = TRUE, background = "#444444")
 }
 ```
 
