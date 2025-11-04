@@ -266,6 +266,10 @@ if (nrow(todays_picks) > 0) {
 # This chunk scrapes live win probabilities from gambletron
 # and joins them with our 'todays_picks' data.
 
+# --- 1. Scrape Code Provided ---
+# Load required libraries
+# (pacman already loaded rvest and dplyr in setup)
+
 # --- Define URLs ---
 url_live <- "https://www.gambletron2000.com/live?sport=nba&team="
 url_inactive <- "https://www.gambletron2000.com/inactive?sport=nba&s=start_time&team="
@@ -357,7 +361,7 @@ today_date <- paste(m, d, sep="/")
 nba_today <- all_games %>%
   filter(
     sport == "NBA",
-    (status == "Live" | game_date == today_date | status == "Finished")
+    (status == "Live" | game_date == today_date)
   )
 
 # --- 6. Process and Join Scraped Data ---
@@ -369,21 +373,19 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
   
   # Reshape data to one row per team
   live_data_team1 <- nba_today %>%
-    select(Team = team_1, live_win_prob = team_1_prob, gambletron_status = status)
+    select(Team = team_1, live_win_prob = team_1_prob)
   
   live_data_team2 <- nba_today %>%
-    select(Team = team_2, live_win_prob = team_2_prob, gambletron_status = status)
+    select(Team = team_2, live_win_prob = team_2_prob)
     
   live_data_final <- bind_rows(live_data_team1, live_data_team2) %>%
     mutate(live_win_prob = convert_prob_to_num(live_win_prob)) %>%
-    # FIXED: Only replace "Blazers" when it's standalone
+    # Gambletron uses "Blazers", our sheet uses "Trail Blazers"
+    # Add any other required mappings here
     mutate(
-      Team = case_when(
-        Team == "Blazers" ~ "Trail Blazers",
-        TRUE ~ Team
-      )
+      Team = str_replace(Team, "Blazers", "Trail Blazers")
     ) %>%
-    distinct(Team, .keep_all = TRUE)
+    distinct(Team, .keep_all = TRUE) # Keep only one entry per team
 
   # Join with todays_picks and calculate Live Expected Skins
   todays_picks <- todays_picks %>%
@@ -400,9 +402,9 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
       )
     )
 } else {
-  # If scrape fails or no games, create empty columns
+  # If scrape fails or no games, create an empty column
   todays_picks <- todays_picks %>%
-    mutate(Live_Expected_Skins = NA_real_, gambletron_status = NA_character_)
+    mutate(Live_Expected_Skins = NA_real_)
 }
 ```
 
@@ -451,12 +453,6 @@ if (nrow(todays_picks) > 0) {
     # Determine if game is in progress: contains Q1-Q4, Half, OT, or time with a colon
     is_in_progress <- grepl("Q[1-4]|Half|OT|\\d+:\\d+", status) & !is_final
     
-    # Determine winner if final
-    winner_abbr <- NA_character_
-    if (is_final && !is.na(team1_score) && !is.na(team2_score)) {
-      winner_abbr <- if_else(team1_score > team2_score, team1_name, team2_name)
-    }
-    
     data.frame(
       Team1 = team1_name,
       Team2 = team2_name,
@@ -465,7 +461,6 @@ if (nrow(todays_picks) > 0) {
       Status = status,
       Finished = is_final,
       InProgress = is_in_progress,
-      Winner = winner_abbr,
       stringsAsFactors = FALSE
     )
   }
@@ -490,14 +485,13 @@ if (nrow(todays_picks) > 0) {
     matchup_game_results <- matchup_game_results %>%
       mutate(
         Team1 = str_replace_all(Team1, team_replacements),
-        Team2 = str_replace_all(Team2, team_replacements),
-        Winner = str_replace_all(Winner, team_replacements)
+        Team2 = str_replace_all(Team2, team_replacements)
       )
   }
   
   # Create Won_Game lookup - only final games
   matchup_won_lookup <- data.frame(Abbr = character(), Won_Game = logical(), stringsAsFactors = FALSE)
-  matchup_status_lookup <- data.frame(Abbr = character(), GameStatus = character(), Winner = character(), stringsAsFactors = FALSE)
+  matchup_status_lookup <- data.frame(Abbr = character(), GameStatus = character(), stringsAsFactors = FALSE)
   
   if (nrow(matchup_game_results) > 0) {
     # Won_Game lookup for finished games
@@ -527,17 +521,17 @@ if (nrow(todays_picks) > 0) {
       )
     
     team_1_status <- all_games_status %>%
-      select(Abbr = Team1, GameStatus, Winner)
+      select(Abbr = Team1, GameStatus)
     
     team_2_status <- all_games_status %>%
-      select(Abbr = Team2, GameStatus, Winner)
+      select(Abbr = Team2, GameStatus)
     
     matchup_status_lookup <- bind_rows(team_1_status, team_2_status) %>%
       distinct()
   }
   
   # Build the matchup table - ONE ROW PER GAME
-  # FIXED: Only override live probabilities for truly final games
+  # *** MODIFICATION: Joined with live data from 'todays_picks' ***
   matchup_prep <- todays_picks %>%
     left_join(matchup_won_lookup, by = "Abbr") %>%
     left_join(matchup_status_lookup, by = "Abbr") %>%
@@ -547,14 +541,6 @@ if (nrow(todays_picks) > 0) {
         Won_Game == FALSE & Pick == "L" ~ TRUE,
         is.na(Won_Game) ~ NA,
         TRUE ~ FALSE
-      ),
-      # FIXED: Only override if GameStatus is exactly "Final" AND Winner is determined
-      Live_Expected_Skins_Corrected = case_when(
-        GameStatus == "Final" & !is.na(Winner) & Abbr == Winner & Pick == "W" ~ 1.0,
-        GameStatus == "Final" & !is.na(Winner) & Abbr == Winner & Pick == "L" ~ 0.0,
-        GameStatus == "Final" & !is.na(Winner) & Abbr != Winner & Pick == "W" ~ 0.0,
-        GameStatus == "Final" & !is.na(Winner) & Abbr != Winner & Pick == "L" ~ 1.0,
-        TRUE ~ Live_Expected_Skins
       ),
       Game_Status = if_else(is.na(GameStatus), "Not Started", GameStatus)
     ) %>%
@@ -568,12 +554,12 @@ if (nrow(todays_picks) > 0) {
       Team_1 = first(Team),
       Pick_1 = first(Pick),
       Won_Skin_1 = first(Won_Skin),
-      Live_Skin_Prob_1 = first(Live_Expected_Skins_Corrected),
+      Live_Skin_Prob_1 = first(Live_Expected_Skins), # <-- ADDED
       Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
       Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
       Pick_2 = if(n() > 1) nth(Pick, 2) else NA_character_,
       Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA,
-      Live_Skin_Prob_2 = if(n() > 1) nth(Live_Expected_Skins_Corrected, 2) else NA,
+      Live_Skin_Prob_2 = if(n() > 1) nth(Live_Expected_Skins, 2) else NA, # <-- ADDED
       Status = first(Game_Status),
       .groups = 'drop'
     ) %>%
@@ -620,13 +606,13 @@ if (nrow(todays_picks) > 0) {
       Team = Team_1,
       Pick = Pick_1,
       `Won Skin` = Won_1,
-      `Live Skin Prob` = Live_Prob_1_Display,
+      `Live Skin Prob` = Live_Prob_1_Display, # <-- ADDED
       VS,
       `Player 2` = Player_2_Display,
       `Team 2` = Team_2_Display,
       `Pick 2` = Pick_2_Display,
       `Won Skin 2` = Won_2,
-      `Live Skin Prob 2` = Live_Prob_2_Display,
+      `Live Skin Prob 2` = Live_Prob_2_Display, # <-- ADDED
       Status
     )
   
@@ -751,35 +737,17 @@ if (nrow(todays_picks) > 0) {
   }
   
   # 6. Create todays_results with actual outcomes
-  # Use the corrected Live_Expected_Skins from matchup_prep if available
-  if (exists("matchup_prep")) {
-    todays_results <- matchup_prep %>%
-      select(Date, Player, Team, Abbr, Pick, `Expected Skins`, 
-             Won_Game, Game_Status, Live_Expected_Skins = Live_Expected_Skins_Corrected) %>%
-      mutate(
-        Actual_Skins = case_when(
-          Won_Game == TRUE & Pick == "W" ~ 1,
-          Won_Game == FALSE & Pick == "L" ~ 1,
-          is.na(Won_Game) ~ NA_real_,
-          TRUE ~ 0
-        ),
-        Skins_Luck = Actual_Skins - `Expected Skins`
-      )
-  } else {
-    todays_results <- todays_picks %>%
-      left_join(final_team_results, by = "Abbr") %>%
-      mutate(
-        Actual_Skins = case_when(
-          Won_Game == TRUE & Pick == "W" ~ 1,
-          Won_Game == FALSE & Pick == "L" ~ 1,
-          is.na(Won_Game) ~ NA_real_,
-          TRUE ~ 0
-        ),
-        Skins_Luck = Actual_Skins - `Expected Skins`,
-        Live_Expected_Skins = if_else("Live_Expected_Skins" %in% names(todays_picks), 
-                                       todays_picks$Live_Expected_Skins, NA_real_)
-      )
-  }
+  todays_results <- todays_picks %>%
+    left_join(final_team_results, by = "Abbr") %>%
+    mutate(
+      Actual_Skins = case_when(
+        Won_Game == TRUE & Pick == "W" ~ 1,
+        Won_Game == FALSE & Pick == "L" ~ 1,
+        is.na(Won_Game) ~ NA_real_,
+        TRUE ~ 0
+      ),
+      Skins_Luck = Actual_Skins - `Expected Skins`
+    )
   
   # 7. Save today's results to file (use underscores for easier CSV handling)
   # This now correctly uses today_ct (which is skins_date) as the filename
@@ -823,25 +791,30 @@ if (nrow(todays_picks) > 0) {
 # Print Table 5: Final Player Summary
 if (exists("todays_results") && nrow(todays_results) > 0) {
   
+  # 'todays_results' already contains 'Live_Expected_Skins'
+  # because it was inherited from the modified 'todays_picks' object
+  # in the 'results_and_luck' chunk. No join is needed here.
+  
   final_player_summary <- todays_results %>%
     group_by(Player) %>%
     summarise(
       `Total Expected Skins` = sum(`Expected Skins`, na.rm = TRUE),
-      `Live Expected Skins` = sum(Live_Expected_Skins, na.rm = TRUE),
+      `Live Expected Skins` = sum(Live_Expected_Skins, na.rm = TRUE), # <-- ADDED
       `Total Actual Skins` = sum(Actual_Skins, na.rm = TRUE),
       `Skins Luck` = sum(Skins_Luck, na.rm = TRUE),
       .groups = 'drop'
     ) %>%
     mutate(
-      `Live Skins Luck` = `Live Expected Skins` - `Total Expected Skins`
+      # Per user request: "Live Skins Luck" = "Live Expected Skins" - "Total Expected Skins"
+      `Live Skins Luck` = `Live Expected Skins` - `Total Expected Skins` # <-- ADDED
     ) %>%
     select(
       Player, 
       `Total Expected Skins`, 
-      `Live Expected Skins`,
+      `Live Expected Skins`, # <-- ADDED
       `Total Actual Skins`, 
       `Skins Luck`, 
-      `Live Skins Luck`
+      `Live Skins Luck` # <-- ADDED
     ) %>%
     arrange(desc(`Skins Luck`))
   
@@ -852,7 +825,7 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
     caption = "Final Player Summary (Expected vs. Actual)"
   ) %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(c(5, 6), bold = TRUE)
+    column_spec(c(5, 6), bold = TRUE) # Updated column spec
 }
 ```
 
@@ -1115,59 +1088,31 @@ if (file.exists(yesterday_file)) {
 #| message: false
 #| warning: false
 
-# RECALCULATE BASELINE FROM CSV FILES - FIXED VERSION
+# Create/update historical baseline data
 historical_file <- file.path(history_dir, "ytd_baseline.csv")
+
+# UPDATED: Nov 2 baseline data (includes Oct 24 - Nov 1)
+ytd_baseline <- tribble(
+  ~Player, ~Games, ~Total_Expected_Skins, ~Total_Actual_Skins, ~Cumulative_Skins_Luck,
+  "Adam", 29, 18.1, 17, -1.1,
+  "Eristeo", 27, 19.8, 20, 0.2,
+  "Kenneth", 31, 18.9, 15, -3.9,
+  "Brian", 30, 18.5, 21, 2.5,
+  "Thomas", 28, 18.4, 12, -6.4,
+  "Matt", 27, 20.1, 20, -0.1
+)
+
+# Save/overwrite the baseline file
+write_csv(ytd_baseline, historical_file)
+
+# CRITICAL FIX: Only write baseline_date.txt if it doesn't exist
+# Set it to Nov 2 so that only Nov 2+ data gets added on top of the baseline
 baseline_date_file <- file.path(history_dir, "baseline_date.txt")
-
-# Get all CSV files
-all_csv_files <- list.files(history_dir, pattern = "^\\d{4}-\\d{2}-\\d{2}\\.csv$", full.names = TRUE)
-
-if (length(all_csv_files) > 0) {
-  # Read all data through Nov 1
-  all_historical_data <- bind_rows(lapply(all_csv_files, function(f) {
-    data <- read_csv(f, show_col_types = FALSE)
-    data$source_file <- basename(f)
-    return(data)
-  }))
-  
-  # Filter for games through Nov 1
-  baseline_cutoff <- as_date("2025-11-01")
-  
-  # FIXED: Count all games for expected skins, but only completed games for actual skins
-  ytd_baseline <- all_historical_data %>%
-    filter(Date <= baseline_cutoff) %>%
-    group_by(Player) %>%
-    summarise(
-      Games = n(),  # Count ALL games
-      Total_Expected_Skins = sum(Expected_Skins, na.rm = TRUE),  # Sum all expected
-      Total_Actual_Skins = sum(Actual_Skins, na.rm = TRUE),  # Sum only completed (NAs become 0)
-      Cumulative_Skins_Luck = sum(Skins_Luck, na.rm = TRUE),  # Sum only completed
-      .groups = 'drop'
-    ) %>%
-    arrange(Player)
-  
-  # Save the recalculated baseline
-  write_csv(ytd_baseline, historical_file)
-  
-  # Set baseline date to Nov 2 (so only Nov 2+ data gets added)
-  if (!file.exists(baseline_date_file)) {
-    writeLines("2025-11-02", baseline_date_file)
-  }
-  baseline_date <- as_date("2025-11-02")
-  
-} else {
-  # No CSV files found, use empty baseline
-  ytd_baseline <- tribble(
-    ~Player, ~Games, ~Total_Expected_Skins, ~Total_Actual_Skins, ~Cumulative_Skins_Luck,
-    "Adam", 0, 0, 0, 0,
-    "Eristeo", 0, 0, 0, 0,
-    "Kenneth", 0, 0, 0, 0,
-    "Brian", 0, 0, 0, 0,
-    "Thomas", 0, 0, 0, 0,
-    "Matt", 0, 0, 0, 0
-  )
-  baseline_date <- as_date("2025-11-02")
+if (!file.exists(baseline_date_file)) {
+  # Set baseline date to Nov 2 - baseline includes everything through Nov 1
+  writeLines("2025-11-02", baseline_date_file)
 }
+baseline_date <- as_date(readLines(baseline_date_file)[1])
 ```
 
 ```{r ytd_cumulative}
@@ -1187,9 +1132,8 @@ if (length(all_files) > 0) {
   if (length(valid_files) > 0) {
     all_history <- bind_rows(lapply(valid_files, function(f) read_csv(f, show_col_types = FALSE)))
     current_year <- year(today_ct)
-    # FIXED: Include all games from valid files, not just completed ones
     ytd_data <- all_history %>%
-      filter(year(Date) == current_year)
+      filter(year(Date) == current_year, !is.na(Actual_Skins))
   }
 }
 
@@ -1197,10 +1141,10 @@ if (nrow(ytd_data) > 0) {
   ytd_new_data <- ytd_data %>%
     group_by(Player) %>%
     summarise(
-      Games_new = n(),  # All games
-      Total_Expected_Skins_new = sum(Expected_Skins, na.rm = TRUE),  # All expected
-      Total_Actual_Skins_new = sum(Actual_Skins, na.rm = TRUE),  # Only completed
-      Cumulative_Skins_Luck_new = sum(Skins_Luck, na.rm = TRUE),  # Only completed
+      Games_new = n(),
+      Total_Expected_Skins_new = sum(Expected_Skins, na.rm = TRUE),
+      Total_Actual_Skins_new = sum(Actual_Skins, na.rm = TRUE),
+      Cumulative_Skins_Luck_new = sum(Skins_Luck, na.rm = TRUE),
       .groups = 'drop'
     )
     
