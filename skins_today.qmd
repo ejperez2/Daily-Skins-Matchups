@@ -410,7 +410,7 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
 
 ---
 
-## Today's Results & Skins Luck
+## Today's Results & Skins Luck (breaks around 10:30p-11:30p)
 
 This section scrapes `plaintextsports.com/nba` for game results. Games that are final or in-progress will appear here.
 
@@ -1085,7 +1085,7 @@ if (file.exists(yesterday_file)) {
 
 ---
 
-## Year-to-Date Cumulative Stats
+## Year-to-Date Cumulative Stats (Not working)
 
 ```{r ytd_setup}
 #| echo: false
