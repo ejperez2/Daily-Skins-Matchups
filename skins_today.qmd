@@ -425,8 +425,17 @@ This section scrapes `plaintextsports.com/nba` for game results. Games that are 
 # Create Head-to-Head Matchup Table
 if (nrow(todays_picks) > 0) {
   
-  # Scrape plaintextsports.com for game results
-  url_scores <- "https://plaintextsports.com/nba/"
+  # --- NEW URL FIX ---
+  # Use live URL during the day, date-specific URL during blackout
+  if (is_blackout_window) {
+    # Blackout: use today's date-specific URL for FINAL scores
+    url_scores <- paste0("https://plaintextsports.com/nba/", today_ct, "/")
+  } else {
+    # Not blackout: use the LIVE, generic URL
+    url_scores <- "https://plaintextsports.com/nba/"
+  }
+  # --- END NEW URL FIX ---
+  
   page_scores <- read_html(url_scores)
   
   # Get all text
@@ -515,7 +524,7 @@ if (nrow(todays_picks) > 0) {
     
     # Status lookup for all games
     all_games_status <- matchup_game_results %>%
-       mutate(
+      mutate(
         GameStatus = case_when(
           Finished == TRUE ~ "Final",
           InProgress == TRUE ~ str_remove(Status, "^(WA|WB|WC|WD|EA|EB|EC|ED)\\s+"),
@@ -526,6 +535,7 @@ if (nrow(todays_picks) > 0) {
     team_1_status <- all_games_status %>%
       select(Abbr = Team1, GameStatus)
     
+    # (This includes the typo fix from last time)
     team_2_status <- all_games_status %>%
       select(Abbr = Team2, GameStatus)
     
@@ -547,6 +557,16 @@ if (nrow(todays_picks) > 0) {
       ),
       Game_Status = if_else(is.na(GameStatus), "Not Started", GameStatus)
     ) %>%
+    
+    # (This includes the 0%/100% fix from last time)
+    mutate(
+      Live_Expected_Skins = case_when(
+        Game_Status == "Final" & !is.na(Won_Skin) & Won_Skin == TRUE ~ 1.0,
+        Game_Status == "Final" & !is.na(Won_Skin) & Won_Skin == FALSE ~ 0.0,
+        TRUE ~ Live_Expected_Skins # Keep original value if not final
+      )
+    ) %>%
+    
     arrange(game_id)
   
   # Create one row per game with both players
@@ -557,12 +577,12 @@ if (nrow(todays_picks) > 0) {
       Team_1 = first(Team),
       Pick_1 = first(Pick),
       Won_Skin_1 = first(Won_Skin),
-      Live_Skin_Prob_1 = first(Live_Expected_Skins), # <-- ADDED
+      Live_Skin_Prob_1 = first(Live_Expected_Skins), 
       Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
       Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
       Pick_2 = if(n() > 1) nth(Pick, 2) else NA_character_,
       Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA,
-      Live_Skin_Prob_2 = if(n() > 1) nth(Live_Expected_Skins, 2) else NA, # <-- ADDED
+      Live_Skin_Prob_2 = if(n() > 1) nth(Live_Expected_Skins, 2) else NA, 
       Status = first(Game_Status),
       .groups = 'drop'
     ) %>%
@@ -609,13 +629,13 @@ if (nrow(todays_picks) > 0) {
       Team = Team_1,
       Pick = Pick_1,
       `Won Skin` = Won_1,
-      `Live Skin Prob` = Live_Prob_1_Display, # <-- ADDED
+      `Live Skin Prob` = Live_Prob_1_Display,
       VS,
       `Player 2` = Player_2_Display,
       `Team 2` = Team_2_Display,
       `Pick 2` = Pick_2_Display,
       `Won Skin 2` = Won_2,
-      `Live Skin Prob 2` = Live_Prob_2_Display, # <-- ADDED
+      `Live Skin Prob 2` = Live_Prob_2_Display,
       Status
     )
   
@@ -642,9 +662,18 @@ if (nrow(todays_picks) > 0) {
 # Only process results if we have games today
 if (nrow(todays_picks) > 0) {
   
-  # 1. Scrape plaintextsports.com for live game data
-url_scores <- paste0("https://plaintextsports.com/nba/", today_ct, "/")
-page_scores <- read_html(url_scores)
+  # --- NEW URL FIX ---
+  # Use live URL during the day, date-specific URL during blackout
+  if (is_blackout_window) {
+    # Blackout: use today's date-specific URL for FINAL scores
+    url_scores <- paste0("https://plaintextsports.com/nba/", today_ct, "/")
+  } else {
+    # Not blackout: use the LIVE, generic URL
+    url_scores <- "https://plaintextsports.com/nba/"
+  }
+  # --- END NEW URL FIX ---
+  
+  page_scores <- read_html(url_scores)
   
   # Get all text from the body
   all_text <- page_scores %>%
@@ -707,6 +736,7 @@ page_scores <- read_html(url_scores)
     "^SA$" = "SAS",
     "^WSH$" = "WAS"
   )
+  
   
   # Apply standardization
   if (nrow(all_game_results) > 0) {
