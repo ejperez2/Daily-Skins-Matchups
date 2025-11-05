@@ -410,7 +410,7 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
 
 ---
 
-## Today's Results & Skins Luck (breaks around 10:30p-11:30p)
+## Today's Results & Skins Luck (breaks around 10:30p)
 
 This section scrapes `plaintextsports.com/nba` for game results. Games that are final or in-progress will appear here.
 
@@ -422,10 +422,8 @@ This section scrapes `plaintextsports.com/nba` for game results. Games that are 
 # Create Head-to-Head Matchup Table
 if (nrow(todays_picks) > 0) {
   
-  # --- FIX: Use the date-specific URL based on today_ct (skins_date) ---
-  url_scores <- paste0("https://plaintextsports.com/nba/", today_ct, "/")
-  # --- End Fix ---
-  
+  # Scrape plaintextsports.com for game results
+  url_scores <- "https://plaintextsports.com/nba/"
   page_scores <- read_html(url_scores)
   
   # Get all text
@@ -514,7 +512,7 @@ if (nrow(todays_picks) > 0) {
     
     # Status lookup for all games
     all_games_status <- matchup_game_results %>%
-      mutate(
+       mutate(
         GameStatus = case_when(
           Finished == TRUE ~ "Final",
           InProgress == TRUE ~ str_remove(Status, "^(WA|WB|WC|WD|EA|EB|EC|ED)\\s+"),
@@ -641,11 +639,9 @@ if (nrow(todays_picks) > 0) {
 # Only process results if we have games today
 if (nrow(todays_picks) > 0) {
   
-  # --- FIX: Use the date-specific URL based on today_ct (skins_date) ---
-  url_scores <- paste0("https://plaintextsports.com/nba/", today_ct, "/")
-  # --- End Fix ---
-  
-  page_scores <- read_html(url_scores)
+  # 1. Scrape plaintextsports.com for live game data
+url_scores <- paste0("https://plaintextsports.com/nba/", today_ct, "/")
+page_scores <- read_html(url_scores)
   
   # Get all text from the body
   all_text <- page_scores %>%
