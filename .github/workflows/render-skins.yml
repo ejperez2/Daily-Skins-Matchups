@@ -4,34 +4,19 @@ name: Render and Publish Skins Page
 on:
   # Schedule based on UTC time
   schedule:
-    # --- Daytime Runs (CDT / UTC-5) ---
-   # - cron: '0 12 * * *'  #  7:00 AM CDT
-    - cron: '0 14 * * *'  #  9:00 AM CDT
-    - cron: '0 18 * * *'  #  1:00 PM CDT
-    - cron: '0 22 * * *'  #  5:00 PM CDT
+    # --- CURRENT SCHEDULE (CST / UTC-6) ---
+    # 7:15 AM CST
+    - cron: '15 13 * * *'
+    # 12:00 PM CST (Noon)
+    - cron: '0 18 * * *'
     
-    # --- Evening Runs (Every 30 mins from 7:00 PM to 1:30 AM CDT) ---
-    - cron: '0 23 * * *'   #  6:00 PM CDT (previous day UTC)
-    - cron: '30 23 * * *'  #  6:30 PM CDT (previous day UTC)
-    - cron: '0 0 * * *'   #  7:00 PM CDT (previous day UTC)
-    - cron: '30 0 * * *'  #  7:30 PM CDT (previous day UTC)
-    - cron: '0 1 * * *'   #  8:00 PM CDT (previous day UTC)
-    - cron: '15 1 * * *'  #  8:15 PM CDT (previous day UTC)
-    - cron: '30 1 * * *'  #  8:30 PM CDT (previous day UTC)
-    - cron: '0 2 * * *'   #  9:00 PM CDT (previous day UTC)
-    - cron: '15 2 * * *'  #  9:15 PM CDT (previous day UTC)
-    - cron: '30 2 * * *'  #  9:30 PM CDT (previous day UTC)
-    - cron: '45 2 * * *'  #  9:45 PM CDT (previous day UTC)
-    - cron: '0 3 * * *'   # 10:00 PM CDT (previous day UTC)
-    - cron: '15 3 * * *'  # 10:15 PM CDT (previous day UTC)
-    - cron: '30 3 * * *'  # 10:30 PM CDT (previous day UTC)
-    - cron: '55 3 * * *'   # 10:55 PM CDT (previous day UTC)
-    - cron: '15 4 * * *'  # 11:15 PM CDT (previous day UTC)
-    - cron: '30 4 * * *'  # 11:30 PM CDT (previous day UTC)
-    - cron: '0 5 * * *'   # 12:00 AM CDT
-    - cron: '30 5 * * *'  # 12:30 AM CDT
-    - cron: '0 6 * * *'   #  1:00 AM CDT
-  #  - cron: '30 6 * * *'  #  1:30 AM CDT
+    # 6:00 PM - 12:55 AM CST (Every 5 mins)
+    # (00:00 - 06:55 UTC)
+    - cron: '*/5 0-6 * * *'
+    
+    # 1:00 AM - 1:30 AM CST (Every 5 mins)
+    # (07:00 - 07:30 UTC)
+    - cron: '0,5,10,15,20,25,30 7 * * *'
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -102,4 +87,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
