@@ -391,20 +391,23 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
   todays_picks <- todays_picks %>%
     left_join(live_data_final, by = "Team") %>%
     mutate(
-      # Calculate Live Expected Skins based on user logic:
-      # W pick = live_win_prob
-      # L pick = 1 - live_win_prob
+      # *** START FIX ***
+      # Calculate Live Expected Skins:
+      # Use live_win_prob if available.
+      # If it's NA (e.g., game hasn't started), 
+      # default to the pre-game "Expected Skins".
       Live_Expected_Skins = case_when(
-        is.na(live_win_prob) ~ NA_real_,
-        Pick == "W" ~ live_win_prob,
-        Pick == "L" ~ 1 - live_win_prob,
-        TRUE ~ NA_real_
+        !is.na(live_win_prob) & Pick == "W" ~ live_win_prob,
+        !is.na(live_win_prob) & Pick == "L" ~ 1 - live_win_prob,
+        is.na(live_win_prob) ~ `Expected Skins`,
+        TRUE ~ `Expected Skins` # Failsafe
       )
+      # *** END FIX ***
     )
 } else {
-  # If scrape fails or no games, create an empty column
+  # If scrape fails or no games, create column and set to default
   todays_picks <- todays_picks %>%
-    mutate(Live_Expected_Skins = NA_real_)
+    mutate(Live_Expected_Skins = `Expected Skins`)
 }
 ```
 
