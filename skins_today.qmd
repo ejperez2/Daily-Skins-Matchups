@@ -1,96 +1,1084 @@
 ---
+
 title: "Today's NBA Skins Picks"
+
 format:
+
   html:
+
     self-contained: true
+
     theme: darkly
+
     grid:
+
       body-width: 1200px
+
     css: |
+
       table {
+
         width: auto !important;
+
         margin-left: auto;
+
         margin-right: auto;
+
       }
+
 ---
 
+
+
 ```{r setup}
+
 #| echo: false
+
 #| message: false
+
 #| warning: false
+
 # Load all required packages for the whole document
+
 if (!require("pacman")) install.packages("pacman")
+
 pacman::p_load(rvest, httr, dplyr, tidyr, stringr, lubridate, tibble, knitr, kableExtra, readr, ggplot2)
 
+
+
 # Create history directory - use relative path that works in both local and GitHub Actions
+
 history_dir <- "skins_history"
+
 if (!dir.exists(history_dir)) {
+
   dir.create(history_dir, recursive = TRUE)
+
 }
+
 ```
+
+
 
 ```{r timestamp}
+
 #| echo: false
+
 #| results: 'asis'
+
 ts <- format(Sys.time(), "%A, %B %d, %Y at %I:%M %p %Z", tz = "America/Chicago")
+
 cat(paste0("<p style='font-size:14px; color:#999;'><strong>Last updated:</strong> ", ts, "</p>"))
+
 ```
 
+
+
 ```{r expected_skins_data}
+
 #| echo: false
+
 #| message: false
+
 #| warning: false
+
 # This chunk must run first (invisibly) to create 'todays_picks'
+
 # for the results tables that now appear at the top.
+
+
 
 # --- Part 0: Define Time and Data Source ---
 
+
+
 # Get current time in Chicago
+
 current_time_ct <- now(tzone = "America/Chicago")
+
 current_hour_ct <- hour(current_time_ct)
 
+
+
 # Define the "skins date" based on the 2 AM cutoff.
+
 # A "day" runs from 2:00 AM to 1:59 AM the next morning.
+
 if (current_hour_ct < 2) {
+
   # If it's 1 AM, it's still "yesterday's" skins date
+
   skins_date <- as_date(current_time_ct) - days(1)
+
 } else {
+
   # If it's 2 AM or later, it's "today's" skins date
+
   skins_date <- as_date(current_time_ct)
+
 }
 
+
+
 # Use skins_date as the definitive date for this run
+
 today_ct <- skins_date 
+
 current_year <- year(today_ct)
 
+
+
 # Define the 11 PM - 2 AM blackout window for scraping
+
 # 23 = 11 PM, 0 = 12 AM, 1 = 1 AM
+
 is_blackout_window <- current_hour_ct >= 23 | current_hour_ct < 2
 
+
+
 # Define draft_data (needs to be available for both branches)
+
 draft_data <- tribble(
+
   ~Team, ~Matchup_Key, ~abbr, ~skins_pick, ~player,
+
   "Utah Jazz", "Jazz|Utah", "UTA", "L", "Eristeo",
+
   "Oklahoma City Thunder", "Thunder|Oklahoma", "OKC", "W", "Matt",
+
   "Washington Wizards", "Wizards|Washington", "WAS", "L", "Brian",
+
   "Brooklyn Nets", "Nets|Brooklyn", "BKN", "L", "Adam",
+
   "Cleveland Cavaliers", "Cavaliers|Cleveland", "CLE", "W", "Thomas",
+
   "Charlotte Hornets", "Hornets|Charlotte", "CHA", "L", "Brian",
+
   "Denver Nuggets", "Nuggets|Denver", "DEN", "W", "Thomas",
+
   "New York Knicks", "Knicks|New York", "NYK", "W", "Adam",
+
   "Houston Rockets", "Rockets|Houston", "HOU", "W", "Kenneth",
+
   "Phoenix Suns", "Suns|Phoenix", "PHX", "L", "Eristeo",
+
   "New Orleans Pelicans", "Pelicans|New Orleans", "NOP", "L", "Matt",
+
   "Orlando Magic", "Magic|Orlando", "ORL", "W", "Kenneth",
+
   "Chicago Bulls", "Bulls|Chicago", "CHI", "L", "Thomas",
+
   "Los Angeles Clippers", "Clippers|LA Clippers", "LAC", "W", "Eristeo",
+
   "Minnesota Timberwolves", "Timberwolves|Minnesota", "MIN", "W", "Matt",
+
   "Portland Trail Blazers", "Trail Blazers|Portland", "POR", "L", "Kenneth",
+
   "Atlanta Hawks", "Hawks|Atlanta", "ATL", "W", "Adam",
+
   "Los Angeles Lakers", "Lakers|LA Lakers", "LAL", "W", "Adam",
+
   "Golden State Warriors", "Warriors|Golden State", "GSW", "W", "Kenneth",
+
   "Sacramento Kings", "Kings|Sacramento", "SAC", "L", "Thomas",
+
   "Detroit Pistons", "Pistons|Detroit", "DET", "W", "Brian",
+
+  "Indiana Pacers", "Pacers|Indiana", "IND", "L", "Eristeo",
+
+  "Miami Heat", "Heat|Miami", "MIA", "L", "Matt",
+
+  "Philadelphia 76ers", "76ers|Philadelphia", "PHI", "W", "Matt",
+
+  "Toronto Raptors", "Raptors|Toronto", "TOR", "L", "Brian",
+
+  "Milwaukee Bucks", "Bucks|Milwaukee", "MIL", "W", "Brian",
+
+  "San Antonio Spurs", "Spurs|San Antonio", "SAS", "W", "Eristeo",
+
+  "Memphis Grizzlies", "Grizzlies|Memphis", "MEM", "W", "Kenneth",
+
+  "Boston Celtics", "Celtics|Boston", "BOS", "W", "Adam",
+
+  "Dallas Mavericks", "Mavericks|Dallas", "DAL", "W", "Thomas"
+
+)
+
+
+
+# --- Part 1: Get Data (Conditional) ---
+
+if (is_blackout_window) {
+
+  # --- BRANCH 1: LOAD FROM CSV (11 PM - 2 AM) ---
+
+  cat("NOTICE: In blackout window (11pm-2am CT). Loading data from CSV for", as.character(skins_date), "\n")
+
+  file_path <- file.path(history_dir, paste0(skins_date, ".csv"))
+
+  
+
+  if (file.exists(file_path)) {
+
+    csv_data <- read_csv(file_path, show_col_types = FALSE)
+
+    
+
+    # Re-format CSV data to match the 'todays_picks' structure
+
+    # We must stub columns that don't exist in the CSV (Moneyline, Implied Prob, game_id)
+
+    todays_picks <- csv_data %>%
+
+      mutate(
+
+        "Expected Skins" = Expected_Skins,
+
+        Moneyline = NA_real_,
+
+        "Implied Prob" = NA_real_,
+
+        # Create a dummy game_id. This assumes the CSV is ordered by game.
+
+        game_id = paste0(Date, "_", ceiling(row_number() / 2))
+
+      ) %>%
+
+      select(Date, Team, Pick, "Expected Skins", Player, Moneyline, "Implied Prob", Abbr, game_id) %>%
+
+      arrange(desc(`Expected Skins`))
+
+      
+
+    cat("Successfully loaded data from:", file_path, "\n")
+
+    
+
+  } else {
+
+    # Blackout window, but no file found. Create an empty table.
+
+    cat("ERROR: In blackout window, but file not found at:", file_path, "\nNo data to display.\n")
+
+    todays_picks <- data.frame(
+
+        Date = as.Date(character()), Team = character(), Pick = character(), 
+
+        `Expected Skins` = double(), Player = character(), Moneyline = double(), 
+
+        `Implied Prob` = double(), Abbr = character(), game_id = character()
+
+      )
+
+  }
+
+  
+
+} else {
+
+  # --- BRANCH 2: SCRAPE FROM WEB (2 AM - 11 PM) ---
+
+  cat("NOTICE: Scraping live data from sportsline.com\n")
+
+  
+
+  # --- Part 1.1: Scrape Expected Odds ---
+
+  url <- paste0("https://www.sportsline.com/nba/odds/money-line/",
+
+                "?t=", format(Sys.time(), "%Y%m%d%H%M%S"))
+
+  googlebot_ua <- "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html"
+
+  page_session <- rvest::session(url, httr::user_agent(googlebot_ua))
+
+  html_content <- rvest::read_html(page_session)
+
+  game_data_raw <- html_content %>% html_element("table") %>% html_table()
+
+  
+
+  # Extract correct columns and clean team names
+
+  game_data <- data.frame(
+
+    Matchup_raw = game_data_raw[[1]],
+
+    consensus = game_data_raw[[3]],
+
+    stringsAsFactors = FALSE
+
+  ) %>%
+
+    mutate(
+
+      # Remove the record (e.g., "2-1") from team names
+
+      Matchup = str_remove(Matchup_raw, "\\d+-\\d+$")
+
+    )
+
+
+
+  # --- Part 1.2: Calculate Expected Skins ---
+
+  convert_odds_to_prob <- function(odds) {
+
+    prob <- case_when(
+
+      odds < 0 ~ abs(odds) / (abs(odds) + 100),
+
+      odds > 0 ~ 100 / (odds + 100),
+
+      TRUE ~ NA_real_
+
+    )
+
+    return(prob)
+
+  }
+
+  
+
+  # FIXED: Use word boundaries to prevent "Hornets" from matching "Nets"
+
+  match_team <- function(matchup_str, draft_data) {
+
+    matchup_upper <- str_to_upper(matchup_str)
+
+    for (i in 1:nrow(draft_data)) {
+
+      keys <- str_split(draft_data$Matchup_Key[i], "\\|")[[1]]
+
+      keys_upper <- str_to_upper(keys)
+
+      
+
+      # Check if any of the keys match (with word boundaries)
+
+      for (key in keys_upper) {
+
+        pattern <- paste0("\\b", key, "\\b")
+
+        if (str_detect(matchup_upper, regex(pattern))) {
+
+          return(draft_data$Matchup_Key[i])
+
+        }
+
+      }
+
+    }
+
+    return(NA_character_)
+
+  }
+
+  
+
+  # Parse based on actual structure
+
+  todays_picks <- game_data %>%
+
+    filter(!is.na(Matchup) & Matchup != "") %>%
+
+    mutate(
+
+      row_id = row_number(),
+
+      game_time_str = str_extract(Matchup_raw, 
+
+        "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+\\d+,\\s+\\d+:\\d+\\s*[AP]M\\s+UTC")
+
+    ) %>%
+
+    # Fill UP because date rows come AFTER team rows
+
+    fill(game_time_str, .direction = "up") %>%
+
+    # Filter out the "Expert Picks" and "Advanced Insights" rows
+
+    filter(!str_detect(Matchup, "Expert Picks|Advanced Insights")) %>%
+
+    # Only keep rows with actual odds (contains +/- numbers)
+
+    filter(str_detect(consensus, "[+-]\\d+")) %>%
+
+    mutate(
+
+      Matchup_Key = vapply(Matchup, match_team, draft_data = draft_data, FUN.VALUE = character(1)),
+
+      game_time_str_with_year = paste(game_time_str, current_year),
+
+      game_time_utc = parse_date_time(
+
+        str_remove(game_time_str_with_year, "\\s+UTC"),
+
+        orders = c("b d, I:M p Y"),
+
+        tz = "UTC"
+
+      ),
+
+      game_time_ct = with_tz(game_time_utc, tzone = "America/Chicago"),
+
+      game_date_ct = as_date(game_time_ct),
+
+      # Create game_id: every 2 consecutive rows are a game
+
+      game_id = paste0(game_date_ct, "_", ceiling(row_number() / 2))
+
+    ) %>%
+
+    # *** THIS IS THE KEY FILTER ***
+
+    # It now filters for games matching the "skins_date" (which is today_ct)
+
+    filter(game_date_ct == today_ct, !is.na(Matchup_Key)) %>%
+
+    mutate(
+
+      # Extract odds from format like "-175Open: -189"
+
+      moneyline = as.numeric(str_extract(consensus, "^[+-]?\\d+")),
+
+      opening_odds = as.numeric(str_extract(consensus, "(?<=Open: )[+-]?\\d+"))
+
+    ) %>%
+
+    # Remove duplicates - keep one row per team per game
+
+    distinct(Matchup_Key, game_id, .keep_all = TRUE) %>%
+
+    mutate(implied_prob = convert_odds_to_prob(moneyline)) %>%
+
+    group_by(game_id) %>%
+
+    mutate(
+
+      total_prob_in_game = sum(implied_prob, na.rm = TRUE),
+
+      prob_no_vig = implied_prob / total_prob_in_game
+
+    ) %>%
+
+    ungroup() %>%
+
+    left_join(draft_data, by = "Matchup_Key") %>%
+
+    filter(!is.na(Team)) %>%
+
+    mutate(
+
+      expected_skins = if_else(skins_pick == "W", prob_no_vig, 1 - prob_no_vig),
+
+      Date = today_ct
+
+    ) %>%
+
+    select(Date, Team, Pick = skins_pick, "Expected Skins" = expected_skins,
+
+           Player = player, Moneyline = moneyline, "Implied Prob" = prob_no_vig,
+
+           Abbr = abbr, game_id) %>%
+
+    arrange(desc(`Expected Skins`))
+
+}
+
+
+
+# --- Part 2: Handle Draft Data Mismatch ---
+
+# (This runs for both CSV and Scrape methods)
+
+if (nrow(todays_picks) > 0) {
+
+  teams_in_picks <- unique(todays_picks$Team)
+
+  teams_in_draft <- unique(draft_data$Team)
+
+  
+
+  # Teams that are in picks but not in draft (indicates a mismatch in draft_data)
+
+  unmatched_teams_in_picks <- setdiff(teams_in_picks, teams_in_draft)
+
+  if (length(unmatched_teams_in_picks) > 0) {
+
+    cat("WARNING: Teams in scraped data but not in draft_data:", 
+
+        paste(unmatched_teams_in_picks, collapse = ", "), "\n")
+
+  }
+
+}
+
+```
+
+
+
+```{r scrape_live_data}
+
+#| echo: false
+
+#| message: false
+
+#| warning: false
+
+
+
+# This chunk scrapes live win probabilities from gambletron
+
+# and joins them with our 'todays_picks' data.
+
+
+
+# --- 1. Scrape Code Provided ---
+
+# Load required libraries
+
+# (pacman already loaded rvest and dplyr in setup)
+
+
+
+# --- Define URLs ---
+
+url_live <- "https://www.gambletron2000.com/live?sport=nba&team="
+
+url_inactive <- "https://www.gambletron2000.com/inactive?sport=nba&s=start_time&team="
+
+
+
+# --- 1. Scrape "Live!" Games ---
+
+response_live <- GET(url_live, user_agent("Mozilla/5.0"))
+
+webpage_live <- read_html(response_live)
+
+
+
+live_nodes <- webpage_live %>% html_elements("li.event-summary")
+
+
+
+live_games <- live_nodes %>%
+
+  lapply(function(node) {
+
+    teams_text <- node %>% 
+
+      html_element("span.team") %>% 
+
+      html_text2() %>% 
+
+      trimws()
+
+    
+
+    teams <- strsplit(teams_text, "\n")[[1]]
+
+    
+
+    probs <- node %>% 
+
+      html_elements("span.pull-right") %>% 
+
+      html_text() %>% 
+
+      trimws()
+
+    
+
+    data.frame(
+
+      status = "Live",
+
+      team_1 = trimws(teams[1]),
+
+      team_2 = trimws(teams[2]),
+
+      team_1_prob = probs[1],
+
+      team_2_prob = probs[2],
+
+      game_date = NA_character_,
+
+      sport = trimws(html_element(node, ".sport .sport-emoji") %>% html_attr("alt"))
+
+    )
+
+  }) %>%
+
+  bind_rows()
+
+
+
+# --- 2. Scrape "Inactive" Games (Starting Later & Finished) ---
+
+response_inactive <- GET(url_inactive, user_agent("Mozilla/5.0"))
+
+webpage_inactive <- read_html(response_inactive)
+
+
+
+# --- 2a. Parse "Starting Later" ---
+
+starting_later_nodes <- webpage_inactive %>% 
+
+  html_elements("#later-container a.event-link")
+
+
+
+starting_later_games <- starting_later_nodes %>%
+
+  lapply(function(node) {
+
+    data.frame(
+
+      status = "Starting Later",
+
+      team_1 = trimws(html_element(node, ".team .away") %>% html_text()),
+
+      team_2 = trimws(html_element(node, ".team .home") %>% html_text()),
+
+      team_1_prob = trimws(html_element(node, ".prob .away") %>% html_text()),
+
+      team_2_prob = trimws(html_element(node, ".prob .home") %>% html_text()),
+
+      game_date = trimws(html_element(node, ".event-time .gt-timestamp") %>% html_text()),
+
+      sport = trimws(html_element(node, ".sport .sport-emoji") %>% html_attr("alt"))
+
+    )
+
+  }) %>%
+
+  bind_rows()
+
+
+
+# --- 2b. Parse "Finished" ---
+
+finished_nodes <- webpage_inactive %>% 
+
+  html_elements("#earlier-container a.event-link")
+
+
+
+finished_games <- finished_nodes %>%
+
+  lapply(function(node) {
+
+    team_1_is_winner <- !is.na(html_element(node, ".team .away.winner"))
+
+    team_2_is_winner <- !is.na(html_element(node, ".team .home.winner"))
+
+    
+
+    data.frame(
+
+      status = "Finished",
+
+      team_1 = trimws(html_element(node, ".team .away") %>% html_text()),
+
+      team_2 = trimws(html_element(node, ".team .home") %>% html_text()),
+
+      team_1_prob = if_else(team_1_is_winner, "100%", if_else(team_2_is_winner, "0%", NA_character_)),
+
+      team_2_prob = if_else(team_2_is_winner, "100%", if_else(team_1_is_winner, "0%", NA_character_)),
+
+      game_date = trimws(html_element(node, ".event-time .gt-timestamp") %>% html_text()),
+
+      sport = trimws(html_element(node, ".sport .sport-emoji") %>% html_attr("alt"))
+
+    )
+
+  }) %>%
+
+  bind_rows()
+
+
+
+# --- 3. Combine all data ---
+
+all_games <- bind_rows(live_games, starting_later_games, finished_games)
+
+
+
+# --- 4. Define "today" ---
+
+m <- sub("^0", "", format(Sys.Date(), "%m")) 
+
+d <- sub("^0", "", format(Sys.Date(), "%d")) 
+
+today_date <- paste(m, d, sep="/")
+
+
+
+# --- 5. Filter for NBA and Today ---
+
+nba_today <- all_games %>%
+
+  filter(
+
+    sport == "NBA",
+
+    (status == "Live" | game_date == today_date)
+
+  )
+
+
+
+# --- 6. Process and Join Scraped Data ---
+
+if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
+
+  # Convert probabilities from "XX%" string to numeric
+
+  convert_prob_to_num <- function(prob_str) {
+
+    as.numeric(str_remove(prob_str, "%")) / 100.0
+
+  }
+
+  
+
+  # Reshape data to one row per team
+
+  live_data_team1 <- nba_today %>%
+
+    select(Team = team_1, live_win_prob = team_1_prob)
+
+  
+
+  live_data_team2 <- nba_today %>%
+
+    select(Team = team_2, live_win_prob = team_2_prob)
+
+    
+
+  live_data_final <- bind_rows(live_data_team1, live_data_team2) %>%
+
+    mutate(live_win_prob = convert_prob_to_num(live_win_prob)) %>%
+
+    # Gambletron uses "Blazers", our sheet uses "Trail Blazers"
+
+    # Add any other required mappings here
+
+    mutate(
+
+      Team = str_replace(Team, "Blazers", "Trail Blazers")
+
+    ) %>%
+
+    distinct(Team, .keep_all = TRUE) # Keep only one entry per team
+
+
+
+  # Join with todays_picks and calculate Live Expected Skins
+
+  todays_picks <- todays_picks %>%
+
+    left_join(live_data_final, by = "Team") %>%
+
+    mutate(
+
+      # Calculate Live Expected Skins based on user logic:
+
+      # W pick = live_win_prob
+
+      # L pick = 1 - live_win_prob
+
+      Live_Expected_Skins = case_when(
+
+        is.na(live_win_prob) ~ NA_real_,
+
+        Pick == "W" ~ live_win_prob,
+
+        Pick == "L" ~ 1 - live_win_prob,
+
+        TRUE ~ NA_real_
+
+      )
+
+    )
+
+} else {
+
+  # If scrape fails or no games, create an empty column
+
+  todays_picks <- todays_picks %>%
+
+    mutate(Live_Expected_Skins = NA_real_)
+
+}
+
+```
+
+
+
+---
+
+
+
+## Today's Results & Skins Luck
+
+
+
+This section scrapes `plaintextsports.com/nba` for game results. Games that are final or in-progress will appear here.
+
+
+
+```{r matchup_table}
+
+#| echo: false
+
+#| message: false
+
+#| warning: false
+
+
+
+# Create Head-to-Head Matchup Table
+
+if (nrow(todays_picks) > 0) {
+
+  
+
+  # Scrape plaintextsports.com for game results
+
+  url_scores <- "https://plaintextsports.com/nba/"
+
+  page_scores <- read_html(url_scores)
+
+  
+
+  # Get all text
+
+  all_text <- page_scores %>%
+
+    html_element("body") %>%
+
+    html_text2()
+
+  
+
+  # Extract score boxes
+
+  all_lines <- strsplit(all_text, "\n")[[1]]
+
+  score_boxes <- all_lines[grepl("^\\+", all_lines)]
+
+  
+
+  # Parse game boxes
+
+  parse_game_box <- function(box) {
+
+    parts <- strsplit(box, "\\|")[[1]]
+
+    status <- str_trim(parts[2])
+
+    
+
+    team1_line <- str_trim(parts[4])
+
+    team1_name <- str_extract(team1_line, "[A-Z]{2,3}")
+
+    team1_score <- suppressWarnings(as.numeric(str_extract(team1_line, "[0-9]+$")))
+
+    
+
+    team2_line <- str_trim(parts[6])
+
+    team2_name <- str_extract(team2_line, "[A-Z]{2,3}")
+
+    team2_score <- suppressWarnings(as.numeric(str_extract(team2_line, "[0-9]+$")))
+
+    
+
+    is_final <- grepl("Final", status, fixed = TRUE)
+
+    
+
+    # Determine if game is in progress: contains Q1-Q4, Half, OT, or time with a colon
+
+    is_in_progress <- grepl("Q[1-4]|Half|OT|\\d+:\\d+", status) & !is_final
+
+    
+
+    data.frame(
+
+      Team1 = team1_name,
+
+      Team2 = team2_name,
+
+      Score1 = team1_score,
+
+      Score2 = team2_score,
+
+      Status = status,
+
+      Finished = is_final,
+
+      InProgress = is_in_progress,
+
+      stringsAsFactors = FALSE
+
+    )
+
+  }
+
+  
+
+  # Parse all games
+
+  if (length(score_boxes) > 0) {
+
+    matchup_game_results <- bind_rows(lapply(score_boxes, parse_game_box))
+
+  } else {
+
+    matchup_game_results <- data.frame()
+
+  }
+
+  
+
+  # Standardize abbreviations: Map scraped names to draft_data names
+
+  team_replacements <- c(
+
+    "^GS$" = "GSW",
+
+    "^NO$" = "NOP",
+
+    "^NY$" = "NYK",
+
+    "^SA$" = "SAS",
+
+    "^WSH$" = "WAS"
+
+  )
+
+  
+
+  if (nrow(matchup_game_results) > 0) {
+
+    matchup_game_results <- matchup_game_results %>%
+
+      mutate(
+
+        Team1 = str_replace_all(Team1, team_replacements),
+
+        Team2 = str_replace_all(Team2, team_replacements)
+
+      )
+
+  }
+
+  
+
+  # Create Won_Game lookup - only final games
+
+  matchup_won_lookup <- data.frame(Abbr = character(), Won_Game = logical(), stringsAsFactors = FALSE)
+
+  matchup_status_lookup <- data.frame(Abbr = character(), GameStatus = character(), stringsAsFactors = FALSE)
+
+  
+
+  if (nrow(matchup_game_results) > 0) {
+
+    # Won_Game lookup for finished games
+
+    finished_games <- matchup_game_results %>% filter(Finished == TRUE)
+
+    
+
+    if (nrow(finished_games) > 0) {
+
+      team_1 <- finished_games %>%
+
+        select(Abbr = Team1, PTS = Score1, Opp_PTS = Score2) %>%
+
+        mutate(Won_Game = PTS > Opp_PTS)
+
+      
+
+      team_2 <- finished_games %>%
+
+        select(Abbr = Team2, PTS = Score2, Opp_PTS = Score1) %>%
+
+        mutate(Won_Game = PTS > Opp_PTS)
+
+      
+
+      matchup_won_lookup <- bind_rows(team_1, team_2) %>%
+
+        select(Abbr, Won_Game)
+
+    }
+
+    
+
+    # Status lookup for all games
+
+    all_games_status <- matchup_game_results %>%
+
+       mutate(
+
+        GameStatus = case_when(
+
+          Finished == TRUE ~ "Final",
+
+          InProgress == TRUE ~ str_remove(Status, "^(WA|WB|WC|WD|EA|EB|EC|ED)\\s+"),
+
+          TRUE ~ "Not Started"
+
+        )
+
+      )
+
+    
+
+    team_1_status <- all_games_status %>%
+
+      select(Abbr = Team1, GameStatus)
+
+    
+
+    team_2_status <- all_games_status %>%
+
+      select(Abbr = Team2, GameStatus)
+
+    
+
+    matchup_status_lookup <- bind_rows(team_1_status, team_2_status) %>%
+
+      distinct()
+
+  }
+
+  
+
+  # Build the matchup table - ONE ROW PER GAME
+
+  # *** MODIFICATION: Joined with live data from 'todays_picks' ***
+
+  matchup_prep <- todays_picks %>%
+
+    left_join(matchup_won_lookup, by = "Abbr") %>%
+
+    left_join(matchup_status_lookup, by = "Abbr") %>%
+
+    mutate(
+
+      Won_Skin = case_when(
+
+        Won_Game == TRUE & Pick == "W" ~ TRUE,
+
+        Won_Game == FALSE & Pick == "L"  "Detroit Pistons", "Pistons|Detroit", "DET", "W", "Brian",
   "Indiana Pacers", "Pacers|Indiana", "IND", "L", "Eristeo",
   "Miami Heat", "Heat|Miami", "MIA", "L", "Matt",
   "Philadelphia 76ers", "76ers|Philadelphia", "PHI", "W", "Matt",
@@ -1409,4 +2397,5 @@ p2 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Expected, color = Player, 
   scale_color_brewer(palette = "Set2")
 
 print(p2)
+
 ```
