@@ -972,7 +972,6 @@ if (nrow(todays_picks) > 0) {
 ---
 
 ## Yesterday's Results
-
 ```{r yesterday_matchup_table}
 #| echo: false
 #| message: false
@@ -994,7 +993,7 @@ if (file.exists(yesterday_file)) {
     yesterday_text <- yesterday_page %>% html_element("body") %>% html_text2()
     yesterday_lines <- strsplit(yesterday_text, "\n")[[1]]
     yesterday_boxes <- yesterday_lines[grepl("^\\+", yesterday_lines)]
-    
+     
     # Parse game boxes to get actual matchups
     parse_game_box <- function(box) {
       parts <- strsplit(box, "\\|")[[1]]
@@ -1019,7 +1018,7 @@ if (file.exists(yesterday_file)) {
       yesterday_matchups <- bind_rows(lapply(yesterday_boxes, parse_game_box))
       
       # Standardize team abbreviations
-      team_replacements <- c(
+       team_replacements <- c(
         "^GS$" = "GSW", "^NO$" = "NOP", "^NY$" = "NYK",
         "^SA$" = "SAS", "^WSH$" = "WAS"
       )
@@ -1028,13 +1027,15 @@ if (file.exists(yesterday_file)) {
         mutate(
           Team1 = str_replace_all(Team1, team_replacements),
           Team2 = str_replace_all(Team2, team_replacements),
-          game_id = paste0("game_", row_number())
+          # *** FIX: Renamed game_id to scrape_game_id to avoid conflict ***
+          scrape_game_id = paste0("game_", row_number())
         )
       
       # Create lookup: each team to its game_id
       team_to_game <- bind_rows(
-        yesterday_matchups %>% select(Abbr = Team1, game_id),
-        yesterday_matchups %>% select(Abbr = Team2, game_id)
+        # *** FIX: Use scrape_game_id ***
+        yesterday_matchups %>% select(Abbr = Team1, scrape_game_id),
+        yesterday_matchups %>% select(Abbr = Team2, scrape_game_id)
       )
       
       # Join CSV data with game_id from actual matchups
@@ -1049,14 +1050,16 @@ if (file.exists(yesterday_file)) {
           ),
           Game_Status = ifelse(is.na(Won_Game), "Not Started", "Final")
         ) %>%
-        filter(!is.na(game_id))
+        # *** FIX: Filter by scrape_game_id ***
+        filter(!is.na(scrape_game_id))
       
       # Build the matchup table - ONE ROW PER GAME
       yesterday_matchup_table <- yesterday_with_game %>%
-        group_by(game_id) %>%
+        # *** FIX: Group by scrape_game_id ***
+        group_by(scrape_game_id) %>%
         summarise(
           Player_1 = first(Player),
-          Team_1 = first(Team),
+           Team_1 = first(Team),
           Pick_1 = first(Pick),
           Won_Skin_1 = first(Won_Skin),
           Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
@@ -1090,7 +1093,7 @@ if (file.exists(yesterday_file)) {
             is.na(Won_Skin_1) ~ "",
             Won_Skin_1 == TRUE ~ "✓ Yes",
             Won_Skin_1 == FALSE ~ "✗ No",
-            TRUE ~ ""
+             TRUE ~ ""
           ),
           Won_2 = case_when(
             is.na(Player_2) ~ "",
@@ -1106,7 +1109,7 @@ if (file.exists(yesterday_file)) {
         select(
           Player = Player_1_Display,
           Team = Team_1,
-          Pick = Pick_1,
+           Pick = Pick_1,
           `Won Skin` = Won_1,
           VS,
           `Player 2` = Player_2_Display,
@@ -1114,7 +1117,7 @@ if (file.exists(yesterday_file)) {
           `Pick 2` = Pick_2_Display,
           `Won Skin 2` = Won_2,
           Status
-        )
+         )
       
       if (nrow(yesterday_matchup_table) > 0) {
         print(knitr::kable(
@@ -1124,7 +1127,7 @@ if (file.exists(yesterday_file)) {
           escape = FALSE,
           format = "html"
         ) %>%
-          kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE))
+           kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE))
         
         yesterday_player_summary <- yesterday_with_game %>%
           group_by(Player) %>%
@@ -1146,7 +1149,7 @@ if (file.exists(yesterday_file)) {
           Player = "TOTAL",
           `Total Expected Skins` = sum(yesterday_player_summary$`Total Expected Skins`, na.rm = TRUE),
           `Total Actual Skins` = sum(yesterday_player_summary$`Total Actual Skins`, na.rm = TRUE),
-          `Skins Luck` = sum(yesterday_player_summary$`Skins Luck`, na.rm = TRUE),
+           `Skins Luck` = sum(yesterday_player_summary$`Skins Luck`, na.rm = TRUE),
           check.names = FALSE,
           stringsAsFactors = FALSE
         )
@@ -1156,7 +1159,7 @@ if (file.exists(yesterday_file)) {
         cat("<br>")
         print(knitr::kable(
           yesterday_player_summary_with_total,
-          digits = 1,
+           digits = 1,
           align = 'c',
           caption = paste0(format(yesterday_ct, "%B %d"), " - Player Summary")
         ) %>%
@@ -1164,11 +1167,13 @@ if (file.exists(yesterday_file)) {
           column_spec(4, bold = TRUE) %>%
           row_spec(nrow(yesterday_player_summary_with_total), bold = TRUE, background = "#444444"))
       }
-    }
+     }
   }
 } else {
   cat(paste0("No data available for ", format(yesterday_ct, "%A, %B %d, %Y"), "."))
 }
+
+
 ```
 
 ---
@@ -1420,3 +1425,4 @@ p2 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Expected, color = Player, 
 
 print(p2)
 ```
+
