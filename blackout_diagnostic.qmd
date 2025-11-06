@@ -1,0 +1,400 @@
+---
+title: "Blackout Period Diagnostic"
+format:
+  html:
+    self-contained: true
+    theme: darkly
+    grid:
+      body-width: 1200px
+---
+
+```{r setup}
+#| echo: false
+#| message: false
+#| warning: false
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(rvest, httr, dplyr, tidyr, stringr, lubridate, tibble, knitr, kableExtra, readr, ggplot2)
+
+history_dir <- "skins_history"
+if (!dir.exists(history_dir)) {
+  dir.create(history_dir, recursive = TRUE)
+}
+```
+
+# Blackout Period Diagnostic Report
+
+## Step 1: Time Calculation
+
+```{r time_calc}
+#| echo: true
+
+# Get current time
+current_time_ct <- now(tzone = "America/Chicago")
+current_hour_ct <- hour(current_time_ct)
+current_minute_ct <- minute(current_time_ct)
+
+cat("===== CURRENT TIME =====\n")
+cat("Current CT Time:", format(current_time_ct, "%Y-%m-%d %H:%M:%S %Z"), "\n")
+cat("Current Hour (CT):", current_hour_ct, "\n")
+cat("Current Minute (CT):", current_minute_ct, "\n\n")
+
+# Calculate skins_date
+if (current_hour_ct < 2) {
+  skins_date <- as_date(current_time_ct) - days(1)
+} else {
+  skins_date <- as_date(current_time_ct)
+}
+
+cat("===== SKINS DATE CALCULATION =====\n")
+cat("Skins Date:", as.character(skins_date), "\n")
+cat("Explanation: Games are assigned to the date they STARTED\n")
+cat("  - If current hour < 2 AM, skins_date = yesterday\n")
+cat("  - If current hour >= 2 AM, skins_date = today\n\n")
+
+# Check blackout status
+use_csv_for_sportsline <- current_hour_ct >= 23 | current_hour_ct < 2
+
+cat("===== BLACKOUT WINDOW CHECK =====\n")
+cat("In Blackout Window?:", use_csv_for_sportsline, "\n")
+cat("Blackout window is: 11 PM (23:00) to 1:59 AM (01:59)\n")
+cat("Current hour:", current_hour_ct, "\n")
+cat("Is hour >= 23?:", current_hour_ct >= 23, "\n")
+cat("Is hour < 2?:", current_hour_ct < 2, "\n\n")
+```
+
+## Step 2: CSV File Check
+
+```{r csv_check}
+#| echo: true
+
+file_path <- file.path(history_dir, paste0(skins_date, ".csv"))
+
+cat("===== CSV FILE CHECK =====\n")
+cat("Expected file path:", file_path, "\n")
+cat("File exists?:", file.exists(file_path), "\n\n")
+
+if (file.exists(file_path)) {
+  csv_data <- read_csv(file_path, show_col_types = FALSE)
+  
+  cat("CSV file found! Contents:\n")
+  cat("  - Number of rows:", nrow(csv_data), "\n")
+  cat("  - Column names:", paste(names(csv_data), collapse = ", "), "\n")
+  cat("  - Has 'game_id' column?:", "game_id" %in% names(csv_data), "\n")
+  cat("  - Unique dates in CSV:", paste(unique(csv_data$Date), collapse = ", "), "\n")
+  cat("  - Unique teams in CSV:", paste(unique(csv_data$Team), collapse = ", "), "\n\n")
+  
+  if ("game_id" %in% names(csv_data)) {
+    cat("  - Unique game_ids:", paste(unique(csv_data$game_id), collapse = ", "), "\n\n")
+  }
+  
+  cat("First few rows:\n")
+  print(head(csv_data))
+} else {
+  cat("CSV file NOT FOUND for date:", as.character(skins_date), "\n")
+  cat("This means blackout window will fail and try to scrape instead\n\n")
+}
+```
+
+## Step 3: What Does Plaintextsports.com Show RIGHT NOW?
+
+```{r plaintextsports_scrape}
+#| echo: true
+
+cat("===== PLAINTEXTSPORTS.COM SCRAPE (GENERIC URL) =====\n")
+cat("Scraping: https://plaintextsports.com/nba/\n")
+cat("Note: This URL shows games for 'TODAY' in plaintextsports time\n\n")
+
+url_scores <- "https://plaintextsports.com/nba/"
+page_scores <- read_html(url_scores)
+all_text <- page_scores %>% html_element("body") %>% html_text2()
+all_lines <- strsplit(all_text, "\n")[[1]]
+score_boxes <- all_lines[grepl("^\\+", all_lines)]
+
+cat("Number of games found:", length(score_boxes), "\n\n")
+
+if (length(score_boxes) > 0) {
+  parse_game_box <- function(box) {
+    parts <- strsplit(box, "\\|")[[1]]
+    status <- str_trim(parts[2])
+    team1_line <- str_trim(parts[4])
+    team1_name <- str_extract(team1_line, "[A-Z]{2,3}")
+    team2_line <- str_trim(parts[6])
+    team2_name <- str_extract(team2_line, "[A-Z]{2,3}")
+    is_final <- grepl("Final", status, fixed = TRUE)
+    
+    data.frame(
+      Team1 = team1_name,
+      Team2 = team2_name,
+      Status = status,
+      Finished = is_final,
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  plaintextsports_games <- bind_rows(lapply(score_boxes, parse_game_box))
+  
+  # Standardize
+  team_replacements <- c("^GS$" = "GSW", "^NO$" = "NOP", "^NY$" = "NYK", "^SA$" = "SAS", "^WSH$" = "WAS")
+  plaintextsports_games <- plaintextsports_games %>%
+    mutate(
+      Team1 = str_replace_all(Team1, team_replacements),
+      Team2 = str_replace_all(Team2, team_replacements)
+    )
+  
+  cat("Games from plaintextsports.com:\n")
+  print(plaintextsports_games)
+  cat("\n")
+} else {
+  cat("No games found on plaintextsports.com\n\n")
+}
+```
+
+## Step 4: What Does Gambletron Show RIGHT NOW?
+
+```{r gambletron_scrape}
+#| echo: true
+
+cat("===== GAMBLETRON.COM SCRAPE =====\n")
+
+url_live <- "https://www.gambletron2000.com/live?sport=nba&team="
+url_inactive <- "https://www.gambletron2000.com/inactive?sport=nba&s=start_time&team="
+
+# Scrape live
+response_live <- GET(url_live, user_agent("Mozilla/5.0"))
+webpage_live <- read_html(response_live)
+live_nodes <- webpage_live %>% html_elements("li.event-summary")
+
+live_games <- live_nodes %>%
+  lapply(function(node) {
+    teams_text <- node %>% html_element("span.team") %>% html_text2() %>% trimws()
+    teams <- strsplit(teams_text, "\n")[[1]]
+    probs <- node %>% html_elements("span.pull-right") %>% html_text() %>% trimws()
+    
+    data.frame(
+      status = "Live",
+      team_1 = trimws(teams[1]),
+      team_2 = trimws(teams[2]),
+      team_1_prob = probs[1],
+      team_2_prob = probs[2],
+      game_date = NA_character_,
+      sport = trimws(html_element(node, ".sport .sport-emoji") %>% html_attr("alt"))
+    )
+  }) %>%
+  bind_rows()
+
+cat("Live games from gambletron:", nrow(live_games), "\n")
+if (nrow(live_games) > 0) print(live_games)
+
+# Scrape inactive
+response_inactive <- GET(url_inactive, user_agent("Mozilla/5.0"))
+webpage_inactive <- read_html(response_inactive)
+
+starting_later_nodes <- webpage_inactive %>% html_elements("#later-container a.event-link")
+starting_later_games <- starting_later_nodes %>%
+  lapply(function(node) {
+    data.frame(
+      status = "Starting Later",
+      team_1 = trimws(html_element(node, ".team .away") %>% html_text()),
+      team_2 = trimws(html_element(node, ".team .home") %>% html_text()),
+      team_1_prob = trimws(html_element(node, ".prob .away") %>% html_text()),
+      team_2_prob = trimws(html_element(node, ".prob .home") %>% html_text()),
+      game_date = trimws(html_element(node, ".event-time .gt-timestamp") %>% html_text()),
+      sport = trimws(html_element(node, ".sport .sport-emoji") %>% html_attr("alt"))
+    )
+  }) %>%
+  bind_rows()
+
+cat("\nStarting later games from gambletron:", nrow(starting_later_games), "\n")
+if (nrow(starting_later_games) > 0) print(starting_later_games)
+
+# Filter for NBA today
+m <- sub("^0", "", format(Sys.Date(), "%m")) 
+d <- sub("^0", "", format(Sys.Date(), "%d")) 
+today_date <- paste(m, d, sep="/")
+
+cat("\n'Today' for gambletron filtering:", today_date, "\n")
+
+all_games <- bind_rows(live_games, starting_later_games)
+nba_today_gambletron <- all_games %>%
+  filter(
+    sport == "NBA",
+    (status == "Live" | game_date == today_date)
+  )
+
+cat("NBA games 'today' per gambletron:", nrow(nba_today_gambletron), "\n")
+if (nrow(nba_today_gambletron) > 0) print(nba_today_gambletron)
+cat("\n")
+```
+
+## Step 5: The Critical Mismatch Analysis
+
+```{r mismatch_analysis}
+#| echo: true
+
+cat("===== MISMATCH ANALYSIS =====\n\n")
+
+cat("SCENARIO DURING BLACKOUT WINDOW:\n")
+cat("1. System loads CSV for skins_date:", as.character(skins_date), "\n")
+cat("2. CSV contains teams that played on:", as.character(skins_date), "\n")
+cat("3. BUT plaintextsports.com shows games for 'today' which is:", as.character(Sys.Date()), "\n")
+cat("4. Calendar date today:", as.character(Sys.Date()), "\n")
+cat("5. Skins date:", as.character(skins_date), "\n")
+cat("6. Are they the same?:", as.character(Sys.Date()) == as.character(skins_date), "\n\n")
+
+if (use_csv_for_sportsline && file.exists(file_path)) {
+  cat("DURING BLACKOUT:\n")
+  cat("- todays_picks will have teams from CSV (skins_date =", as.character(skins_date), ")\n")
+  cat("- plaintextsports scrape shows teams from calendar date =", as.character(Sys.Date()), "\n")
+  
+  if (as.character(Sys.Date()) != as.character(skins_date)) {
+    cat("\n⚠️ CRITICAL ISSUE IDENTIFIED:\n")
+    cat("The dates don't match! CSV has games from", as.character(skins_date), "\n")
+    cat("but live scraping shows games from", as.character(Sys.Date()), "\n")
+    cat("This will cause the join to fail and create phantom matchups!\n\n")
+  }
+}
+
+cat("\n===== PROPOSED SOLUTION =====\n")
+cat("During blackout window (11 PM - 2 AM):\n")
+cat("1. Load CSV for expected skins data ✓ (already implemented)\n")
+cat("2. Also load GAME RESULTS from the CSV ✗ (NOT implemented)\n")
+cat("3. DO NOT scrape plaintextsports.com during blackout ✗ (currently scrapes anyway)\n")
+cat("4. DO NOT scrape gambletron during blackout ✗ (currently scrapes anyway)\n")
+cat("5. Use stored game results from CSV for matchup table\n\n")
+
+cat("The fix requires:\n")
+cat("- Wrap plaintextsports scraping in matchup_table chunk with blackout check\n")
+cat("- Wrap gambletron scraping in scrape_live_data chunk with blackout check\n")
+cat("- During blackout, use only CSV data for everything (expected skins + results)\n")
+```
+
+## Step 6: Detailed Data Flow Trace
+
+```{r data_flow}
+#| echo: true
+
+cat("===== DATA FLOW DURING BLACKOUT =====\n\n")
+
+if (use_csv_for_sportsline && file.exists(file_path)) {
+  cat("STEP 1: Load CSV\n")
+  csv_data <- read_csv(file_path, show_col_types = FALSE)
+  cat("  Teams in CSV:", paste(unique(csv_data$Team), collapse = ", "), "\n")
+  cat("  Dates in CSV:", paste(unique(csv_data$Date), collapse = ", "), "\n\n")
+  
+  cat("STEP 2: Create todays_picks from CSV\n")
+  cat("  todays_picks will contain these teams\n")
+  cat("  All with Date =", as.character(skins_date), "\n\n")
+  
+  cat("STEP 3: Scrape plaintextsports.com (HAPPENS REGARDLESS OF BLACKOUT)\n")
+  if (exists("plaintextsports_games") && nrow(plaintextsports_games) > 0) {
+    all_teams_scraped <- c(plaintextsports_games$Team1, plaintextsports_games$Team2)
+    cat("  Teams scraped:", paste(unique(all_teams_scraped), collapse = ", "), "\n")
+    cat("  These are games from calendar date:", as.character(Sys.Date()), "\n\n")
+  }
+  
+  cat("STEP 4: Join todays_picks (from CSV) with scraped results\n")
+  csv_teams <- unique(csv_data$Abbr)
+  
+  if (exists("plaintextsports_games") && nrow(plaintextsports_games) > 0) {
+    scraped_teams <- unique(c(plaintextsports_games$Team1, plaintextsports_games$Team2))
+    
+    cat("  Teams in CSV:", paste(csv_teams, collapse = ", "), "\n")
+    cat("  Teams scraped:", paste(scraped_teams, collapse = ", "), "\n")
+    
+    in_csv_not_scraped <- setdiff(csv_teams, scraped_teams)
+    in_scraped_not_csv <- setdiff(scraped_teams, csv_teams)
+    
+    cat("\n  ⚠️ Teams in CSV but NOT in scraped data:", 
+        if(length(in_csv_not_scraped) > 0) paste(in_csv_not_scraped, collapse = ", ") else "None", "\n")
+    cat("  ⚠️ Teams in scraped data but NOT in CSV:", 
+        if(length(in_scraped_not_csv) > 0) paste(in_scraped_not_csv, collapse = ", ") else "None", "\n\n")
+    
+    if (length(in_scraped_not_csv) > 0) {
+      cat("  🔴 PROBLEM: Scraped teams not in CSV will create phantom matchups!\n")
+      cat("     These teams will appear in the matchup table with data from the wrong date\n\n")
+    }
+  }
+}
+
+cat("\n===== RECOMMENDATION =====\n")
+cat("During blackout, the system should:\n")
+cat("1. Load ALL data from CSV (expected skins, game results, matchups)\n")
+cat("2. Skip ALL live scraping (plaintextsports, gambletron, sportsline)\n")
+cat("3. Display the data from CSV as-is\n")
+cat("4. Resume live scraping after 2 AM when skins_date advances\n")
+```
+
+## Step 7: Game ID Analysis
+
+```{r game_id_analysis}
+#| echo: true
+
+cat("===== GAME_ID ANALYSIS =====\n\n")
+
+if (use_csv_for_sportsline && file.exists(file_path)) {
+  csv_data <- read_csv(file_path, show_col_types = FALSE)
+  
+  if ("game_id" %in% names(csv_data)) {
+    cat("CSV has game_id column ✓\n")
+    cat("Unique game_ids in CSV:\n")
+    game_ids_csv <- unique(csv_data$game_id)
+    print(game_ids_csv)
+    cat("\n")
+    
+    # Check if game_ids are properly structured
+    cat("Game ID structure check:\n")
+    for (gid in game_ids_csv) {
+      teams_in_game <- csv_data %>% filter(game_id == gid) %>% pull(Team)
+      cat("  ", gid, "->", paste(teams_in_game, collapse = " vs "), "\n")
+    }
+    cat("\n")
+    
+    cat("During matchup_table creation:\n")
+    cat("- System groups by game_id to create one row per game\n")
+    cat("- If plaintextsports scrape has different teams, join fails\n")
+    cat("- Result: some game_ids have no match, creating incomplete matchups\n\n")
+    
+  } else {
+    cat("⚠️ CSV DOES NOT have game_id column!\n")
+    cat("This is an OLD CSV format. System will try to re-scrape.\n")
+    cat("But during blackout, re-scraping gets the WRONG date's games!\n\n")
+  }
+}
+```
+
+## Summary
+
+```{r summary}
+#| echo: false
+#| results: 'asis'
+
+cat("## 🎯 ROOT CAUSE SUMMARY\n\n")
+
+if (use_csv_for_sportsline) {
+  cat("**System is in BLACKOUT WINDOW**\n\n")
+  cat("❌ **BROKEN BEHAVIORS:**\n\n")
+  cat("1. `expected_skins_data` chunk: Loads CSV for skins_date (", as.character(skins_date), ") ✓\n")
+  cat("2. `scrape_live_data` chunk: STILL scrapes gambletron for calendar date (", as.character(Sys.Date()), ") ❌\n")
+  cat("3. `matchup_table` chunk: STILL scrapes plaintextsports for calendar date (", as.character(Sys.Date()), ") ❌\n")
+  cat("4. Join fails because:\n")
+  cat("   - todays_picks has teams from ", as.character(skins_date), "\n")
+  cat("   - Scraped data has teams from ", as.character(Sys.Date()), "\n")
+  cat("   - No overlap = phantom matchups or empty table\n\n")
+  
+  cat("✅ **REQUIRED FIXES:**\n\n")
+  cat("1. Add blackout check to `scrape_live_data` chunk\n")
+  cat("2. Add blackout check to `matchup_table` chunk\n")
+  cat("3. During blackout, load game results from CSV instead of scraping\n")
+  cat("4. During blackout, skip gambletron scraping entirely\n\n")
+  
+} else {
+  cat("**System is NOT in blackout window**\n\n")
+  cat("Live scraping should work normally.\n")
+  cat("All scraped data should be from skins_date: ", as.character(skins_date), "\n\n")
+}
+
+cat("**TEST THIS DIAGNOSTIC:**\n")
+cat("- Run between 11 PM - 2 AM to see blackout issues\n")
+cat("- Run between 2 AM - 11 PM to see normal operation\n")
+cat("- Compare the team lists in each step to spot mismatches\n")
+```
