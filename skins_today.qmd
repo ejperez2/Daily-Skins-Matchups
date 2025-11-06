@@ -63,9 +63,10 @@ if (current_hour_ct < 2) {
 today_ct <- skins_date 
 current_year <- year(today_ct)
 
-# Define the 11 PM - 2 AM blackout window for scraping
-# 23 = 11 PM, 0 = 12 AM, 1 = 1 AM
-is_blackout_window <- current_hour_ct >= 23 | current_hour_ct < 2
+# NEW APPROACH: Use CSV after 7 PM instead of complex blackout window
+# After 7 PM, use saved CSV data for expected skins (sportsline data)
+# Gambletron and plaintextsports will still be scraped for live updates
+use_csv_for_sportsline <- current_hour_ct >= 19  # 7 PM or later
 
 # Define draft_data (needs to be available for both branches)
 draft_data <- tribble(
@@ -103,16 +104,15 @@ draft_data <- tribble(
 )
 
 # --- Part 1: Get Data (Conditional) ---
-if (is_blackout_window) {
-  # --- BRANCH 1: LOAD FROM CSV (11 PM - 2 AM) ---
-  cat("NOTICE: In blackout window (11pm-2am CT). Loading data from CSV for", as.character(skins_date), "\n")
+if (use_csv_for_sportsline) {
+  # --- BRANCH 1: LOAD FROM CSV (After 7 PM) ---
+  cat("NOTICE: After 7 PM - loading expected skins from today's CSV\n")
   file_path <- file.path(history_dir, paste0(skins_date, ".csv"))
   
   if (file.exists(file_path)) {
     csv_data <- read_csv(file_path, show_col_types = FALSE)
     
     # Re-format CSV data to match the 'todays_picks' structure
-    # We must stub columns that don't exist in the CSV (Moneyline, Implied Prob, game_id)
     todays_picks <- csv_data %>%
       mutate(
         "Expected Skins" = Expected_Skins,
@@ -127,18 +127,15 @@ if (is_blackout_window) {
     cat("Successfully loaded data from:", file_path, "\n")
     
   } else {
-    # Blackout window, but no file found. Create an empty table.
-    cat("ERROR: In blackout window, but file not found at:", file_path, "\nNo data to display.\n")
-    todays_picks <- data.frame(
-        Date = as.Date(character()), Team = character(), Pick = character(), 
-        `Expected Skins` = double(), Player = character(), Moneyline = double(), 
-        `Implied Prob` = double(), Abbr = character(), game_id = character()
-      )
+    # After 7 PM but no file found - try to scrape anyway
+    cat("WARNING: After 7 PM but no CSV found. Attempting to scrape sportsline...\n")
+    use_csv_for_sportsline <- FALSE
   }
-  
-} else {
-  # --- BRANCH 2: SCRAPE FROM WEB (2 AM - 11 PM) ---
-  cat("NOTICE: Scraping live data from sportsline.com\n")
+}
+
+if (!use_csv_for_sportsline) {
+  # --- BRANCH 2: SCRAPE FROM WEB (Before 7 PM or if CSV missing) ---
+  cat("NOTICE: Scraping data from sportsline.com\n")
   
   # --- Part 1.1: Scrape Expected Odds ---
   url <- paste0("https://www.sportsline.com/nba/odds/money-line/",
@@ -380,10 +377,42 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
     
   live_data_final <- bind_rows(live_data_team1, live_data_team2) %>%
     mutate(live_win_prob = convert_prob_to_num(live_win_prob)) %>%
-    # Gambletron uses "Blazers", our sheet uses "Trail Blazers"
-    # Add any other required mappings here
+    # ENHANCED TEAM NAME MAPPING for Gambletron
+    # Gambletron uses shorter names, our sheet uses full names
     mutate(
-      Team = str_replace(Team, "Blazers", "Trail Blazers")
+      Team = case_when(
+        str_detect(Team, "Blazers") ~ "Portland Trail Blazers",
+        str_detect(Team, "76ers") ~ "Philadelphia 76ers",
+        Team == "Pistons" ~ "Detroit Pistons",
+        Team == "Heat" ~ "Miami Heat",
+        Team == "Celtics" ~ "Boston Celtics",
+        Team == "Nets" ~ "Brooklyn Nets",
+        Team == "Knicks" ~ "New York Knicks",
+        Team == "Raptors" ~ "Toronto Raptors",
+        Team == "Bulls" ~ "Chicago Bulls",
+        Team == "Cavaliers" ~ "Cleveland Cavaliers",
+        Team == "Pacers" ~ "Indiana Pacers",
+        Team == "Bucks" ~ "Milwaukee Bucks",
+        Team == "Hawks" ~ "Atlanta Hawks",
+        Team == "Hornets" ~ "Charlotte Hornets",
+        Team == "Magic" ~ "Orlando Magic",
+        Team == "Wizards" ~ "Washington Wizards",
+        Team == "Nuggets" ~ "Denver Nuggets",
+        Team == "Timberwolves" ~ "Minnesota Timberwolves",
+        Team == "Thunder" ~ "Oklahoma City Thunder",
+        Team == "Jazz" ~ "Utah Jazz",
+        Team == "Warriors" ~ "Golden State Warriors",
+        Team == "Clippers" ~ "Los Angeles Clippers",
+        Team == "Lakers" ~ "Los Angeles Lakers",
+        Team == "Suns" ~ "Phoenix Suns",
+        Team == "Kings" ~ "Sacramento Kings",
+        Team == "Mavericks" ~ "Dallas Mavericks",
+        Team == "Rockets" ~ "Houston Rockets",
+        Team == "Grizzlies" ~ "Memphis Grizzlies",
+        Team == "Pelicans" ~ "New Orleans Pelicans",
+        Team == "Spurs" ~ "San Antonio Spurs",
+        TRUE ~ Team
+      )
     ) %>%
     distinct(Team, .keep_all = TRUE) # Keep only one entry per team
 
@@ -771,9 +800,25 @@ if (nrow(todays_picks) > 0) {
     arrange(Player, Team)
   
   if (nrow(completed_games_table) > 0) {
-    knitr::kable(completed_games_table, digits = 1, align = 'c', caption = "Skins Results for Completed Games") %>%
+    # Add TOTAL row
+    total_row <- data.frame(
+      Player = "TOTAL",
+      Team = "",
+      Pick = "",
+      `Won Game?` = NA,
+      `Actual Skins` = sum(completed_games_table$`Actual Skins`, na.rm = TRUE),
+      `Expected Skins` = sum(completed_games_table$`Expected Skins`, na.rm = TRUE),
+      `Skins Luck` = sum(completed_games_table$`Skins Luck`, na.rm = TRUE),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+    
+    completed_games_with_total <- bind_rows(completed_games_table, total_row)
+    
+    knitr::kable(completed_games_with_total, digits = 1, align = 'c', caption = "Skins Results for Completed Games") %>%
       kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-      column_spec(c(5, 7), bold = TRUE)
+      column_spec(c(5, 7), bold = TRUE) %>%
+      row_spec(nrow(completed_games_with_total), bold = TRUE, background = "#444444")
   } else {
     cat("No games have been completed yet today.")
   }
@@ -818,14 +863,29 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
     ) %>%
     arrange(desc(`Skins Luck`))
   
+  # Add TOTAL row
+  total_row <- data.frame(
+    Player = "TOTAL",
+    `Total Expected Skins` = sum(final_player_summary$`Total Expected Skins`, na.rm = TRUE),
+    `Live Expected Skins` = sum(final_player_summary$`Live Expected Skins`, na.rm = TRUE),
+    `Total Actual Skins` = sum(final_player_summary$`Total Actual Skins`, na.rm = TRUE),
+    `Skins Luck` = sum(final_player_summary$`Skins Luck`, na.rm = TRUE),
+    `Live Skins Luck` = sum(final_player_summary$`Live Skins Luck`, na.rm = TRUE),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+  
+  final_player_summary_with_total <- bind_rows(final_player_summary, total_row)
+  
   knitr::kable(
-    final_player_summary,
+    final_player_summary_with_total,
     digits = 1,
     align = 'c',
     caption = "Final Player Summary (Expected vs. Actual)"
   ) %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(c(5, 6), bold = TRUE) # Updated column spec
+    column_spec(c(5, 6), bold = TRUE) %>%
+    row_spec(nrow(final_player_summary_with_total), bold = TRUE, background = "#444444")
 }
 ```
 
@@ -1062,15 +1122,28 @@ if (file.exists(yesterday_file)) {
           ) %>%
           arrange(desc(`Skins Luck`))
         
+        # Add TOTAL row
+        total_row <- data.frame(
+          Player = "TOTAL",
+          `Total Expected Skins` = sum(yesterday_player_summary$`Total Expected Skins`, na.rm = TRUE),
+          `Total Actual Skins` = sum(yesterday_player_summary$`Total Actual Skins`, na.rm = TRUE),
+          `Skins Luck` = sum(yesterday_player_summary$`Skins Luck`, na.rm = TRUE),
+          check.names = FALSE,
+          stringsAsFactors = FALSE
+        )
+        
+        yesterday_player_summary_with_total <- bind_rows(yesterday_player_summary, total_row)
+        
         cat("<br>")
         print(knitr::kable(
-          yesterday_player_summary,
+          yesterday_player_summary_with_total,
           digits = 1,
           align = 'c',
           caption = paste0(format(yesterday_ct, "%B %d"), " - Player Summary")
         ) %>%
           kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-          column_spec(4, bold = TRUE))
+          column_spec(4, bold = TRUE) %>%
+          row_spec(nrow(yesterday_player_summary_with_total), bold = TRUE, background = "#444444"))
       }
     }
   }
