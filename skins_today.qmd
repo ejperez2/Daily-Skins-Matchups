@@ -262,7 +262,6 @@ if (nrow(todays_picks) > 0) {
 
 # This chunk scrapes live win probabilities from gambletron
 # and joins them with our 'todays_picks' data.
-
 # --- 1. Scrape Code Provided ---
 # Load required libraries
 # (pacman already loaded rvest and dplyr in setup)
@@ -377,40 +376,41 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
     
   live_data_final <- bind_rows(live_data_team1, live_data_team2) %>%
     mutate(live_win_prob = convert_prob_to_num(live_win_prob)) %>%
-    # ENHANCED TEAM NAME MAPPING for Gambletron
-    # Gambletron uses shorter names, our sheet uses full names
+    # *** FIX APPLIED HERE ***
+    # Changed all `==` to `str_detect` to flexibly match team names
+    # from different scrapers (e.g., "Knicks" vs "NY Knicks")
     mutate(
       Team = case_when(
         str_detect(Team, "Blazers") ~ "Portland Trail Blazers",
         str_detect(Team, "76ers") ~ "Philadelphia 76ers",
-        Team == "Pistons" ~ "Detroit Pistons",
-        Team == "Heat" ~ "Miami Heat",
-        Team == "Celtics" ~ "Boston Celtics",
-        Team == "Nets" ~ "Brooklyn Nets",
-        Team == "Knicks" ~ "New York Knicks",
-        Team == "Raptors" ~ "Toronto Raptors",
-        Team == "Bulls" ~ "Chicago Bulls",
-        Team == "Cavaliers" ~ "Cleveland Cavaliers",
-        Team == "Pacers" ~ "Indiana Pacers",
-        Team == "Bucks" ~ "Milwaukee Bucks",
-        Team == "Hawks" ~ "Atlanta Hawks",
-        Team == "Hornets" ~ "Charlotte Hornets",
-        Team == "Magic" ~ "Orlando Magic",
-        Team == "Wizards" ~ "Washington Wizards",
-        Team == "Nuggets" ~ "Denver Nuggets",
-        Team == "Timberwolves" ~ "Minnesota Timberwolves",
-        Team == "Thunder" ~ "Oklahoma City Thunder",
-        Team == "Jazz" ~ "Utah Jazz",
-        Team == "Warriors" ~ "Golden State Warriors",
-        Team == "Clippers" ~ "Los Angeles Clippers",
-        Team == "Lakers" ~ "Los Angeles Lakers",
-        Team == "Suns" ~ "Phoenix Suns",
-        Team == "Kings" ~ "Sacramento Kings",
-        Team == "Mavericks" ~ "Dallas Mavericks",
-        Team == "Rockets" ~ "Houston Rockets",
-        Team == "Grizzlies" ~ "Memphis Grizzlies",
-        Team == "Pelicans" ~ "New Orleans Pelicans",
-        Team == "Spurs" ~ "San Antonio Spurs",
+        str_detect(Team, "Pistons") ~ "Detroit Pistons",
+        str_detect(Team, "Heat") ~ "Miami Heat",
+        str_detect(Team, "Celtics") ~ "Boston Celtics",
+        str_detect(Team, "Nets") ~ "Brooklyn Nets",
+        str_detect(Team, "Knicks") ~ "New York Knicks",
+        str_detect(Team, "Raptors") ~ "Toronto Raptors",
+        str_detect(Team, "Bulls") ~ "Chicago Bulls",
+        str_detect(Team, "Cavaliers") ~ "Cleveland Cavaliers",
+        str_detect(Team, "Pacers") ~ "Indiana Pacers",
+        str_detect(Team, "Bucks") ~ "Milwaukee Bucks",
+        str_detect(Team, "Hawks") ~ "Atlanta Hawks",
+        str_detect(Team, "Hornets") ~ "Charlotte Hornets",
+        str_detect(Team, "Magic") ~ "Orlando Magic",
+        str_detect(Team, "Wizards") ~ "Washington Wizards",
+        str_detect(Team, "Nuggets") ~ "Denver Nuggets",
+        str_detect(Team, "Timberwolves") ~ "Minnesota Timberwolves",
+        str_detect(Team, "Thunder") ~ "Oklahoma City Thunder",
+        str_detect(Team, "Jazz") ~ "Utah Jazz",
+        str_detect(Team, "Warriors") ~ "Golden State Warriors",
+        str_detect(Team, "Clippers") ~ "Los Angeles Clippers",
+        str_detect(Team, "Lakers") ~ "Los Angeles Lakers",
+        str_detect(Team, "Suns") ~ "Phoenix Suns",
+        str_detect(Team, "Kings") ~ "Sacramento Kings",
+        str_detect(Team, "Mavericks") ~ "Dallas Mavericks",
+        str_detect(Team, "Rockets") ~ "Houston Rockets",
+        str_detect(Team, "Grizzlies") ~ "Memphis Grizzlies",
+        str_detect(Team, "Pelicans") ~ "New Orleans Pelicans",
+        str_detect(Team, "Spurs") ~ "San Antonio Spurs",
         TRUE ~ Team
       )
     ) %>%
