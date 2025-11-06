@@ -35,7 +35,14 @@ if (!dir.exists(history_dir)) {
 ts <- format(Sys.time(), "%A, %B %d, %Y at %I:%M %p %Z", tz = "America/Chicago")
 cat(paste0("<p style='font-size:14px; color:#999;'><strong>Last updated:</strong> ", ts, "</p>"))
 ```
-
+```{r explain-display, echo=FALSE, results='asis'}
+# Display season completion percentage
+cat(sprintf(
+  "<p style='font-size:14px; margin-top:0px; margin-bottom:16px;'>
+    <strong><a href='https://bdubcodes.net/posts/the-nba-skins-game'>Skins Game</a>:</strong> In this fantasy NBA game, players draft all 30 NBA teams. For each team, you must choose to root for their WINS or their LOSSES. If your chosen outcome happens (e.g., you picked 'losses' for the Spurs and they lose), you get a 'skin,' or a point. Whoever accumulates the most skins wins.</p>" 
+  )
+)
+```
 ```{r expected_skins_data}
 #| echo: false
 #| message: false
@@ -106,7 +113,7 @@ draft_data <- tribble(
 # --- Part 1: Get Data (Conditional) ---
 if (use_csv_for_sportsline) {
   # --- BRANCH 1: LOAD FROM CSV (After 7 PM) ---
-  cat("NOTICE: After 7 PM - loading expected skins from today's CSV\n")
+  cat("DIAGNOSTIC: After 7 PM - loading expected skins from today's CSV\n")
   file_path <- file.path(history_dir, paste0(skins_date, ".csv"))
   
   if (file.exists(file_path)) {
@@ -541,7 +548,7 @@ if (nrow(todays_picks) > 0) {
     
     # Status lookup for all games
     all_games_status <- matchup_game_results %>%
-       mutate(
+      mutate(
         GameStatus = case_when(
           Finished == TRUE ~ "Final",
           InProgress == TRUE ~ str_remove(Status, "^(WA|WB|WC|WD|EA|EB|EC|ED)\\s+"),
@@ -587,7 +594,7 @@ if (nrow(todays_picks) > 0) {
       Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
       Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
       Pick_2 = if(n() > 1) nth(Pick, 2) else NA_character_,
-      Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA,
+      Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA, # <-- This is now correct
       Live_Skin_Prob_2 = if(n() > 1) nth(Live_Expected_Skins, 2) else NA, # <-- ADDED
       Status = first(Game_Status),
       .groups = 'drop'
@@ -601,26 +608,35 @@ if (nrow(todays_picks) > 0) {
           cell_spec(Player_1, background = "#FFB6C6", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         TRUE ~ Player_1
       ),
+      
+      # *** FIX APPLIED HERE ***
+      # This logic now correctly references Won_Skin_2
       Player_2_Display = case_when(
         is.na(Player_2) ~ "",
-        Status == "Final" & !is.na(Won_Skin_2) & Won_Skin_2 ~ 
+        Status == "Final" & !is.na(Won_Skin_2) & Won_Skin_2 == TRUE ~ 
           cell_spec(Player_2, background = "#90EE90", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        Status == "Final" & !is.na(Won_Skin_2) & !Won_Skin_2 ~ 
+        Status == "Final" & !is.na(Won_Skin_2) & Won_Skin_2 == FALSE ~ 
           cell_spec(Player_2, background = "#FFB6C6", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         TRUE ~ Player_2
       ),
+      
       # Add checkmarks for Won_Skin status
+      # *** FIX APPLIED HERE ***
+      # Added Status == "Final" check to prevent "Yes/No" on in-progress games
       Won_1 = case_when(
+        Status != "Final" ~ "",
         is.na(Won_Skin_1) ~ "",
         Won_Skin_1 ~ "✓ Yes",
         TRUE ~ "✗ No"
       ),
       Won_2 = case_when(
+        Status != "Final" ~ "",
         is.na(Player_2) ~ "",
         is.na(Won_Skin_2) ~ "",
         Won_Skin_2 ~ "✓ Yes",
         TRUE ~ "✗ No"
       ),
+      
       # Format Live Probabilities
       Live_Prob_1_Display = if_else(is.na(Live_Skin_Prob_1), "", paste0(sprintf("%.0f", Live_Skin_Prob_1 * 100), "%")),
       Live_Prob_2_Display = if_else(is.na(Live_Skin_Prob_2), "", paste0(sprintf("%.0f", Live_Skin_Prob_2 * 100), "%")),
@@ -644,6 +660,7 @@ if (nrow(todays_picks) > 0) {
       `Live Skin Prob 2` = Live_Prob_2_Display, # <-- ADDED
       Status
     )
+  
   
   # Create the table with HTML formatting enabled
   knitr::kable(
