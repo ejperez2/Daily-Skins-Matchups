@@ -52,11 +52,11 @@ cat("  - If current hour < 2 AM, skins_date = yesterday\n")
 cat("  - If current hour >= 2 AM, skins_date = today\n\n")
 
 # Check blackout status
-use_csv_for_sportsline <- current_hour_ct >= 23 | current_hour_ct < 2
+use_csv_for_sportsline <- current_hour_ct >= 12 | current_hour_ct < 2
 
 cat("===== BLACKOUT WINDOW CHECK =====\n")
 cat("In Blackout Window?:", use_csv_for_sportsline, "\n")
-cat("Blackout window is: 11 PM (23:00) to 1:59 AM (01:59)\n")
+cat("Blackout window is: noon to 1:59 AM (01:59)\n")
 cat("Current hour:", current_hour_ct, "\n")
 cat("Is hour >= 23?:", current_hour_ct >= 23, "\n")
 cat("Is hour < 2?:", current_hour_ct < 2, "\n\n")
@@ -255,7 +255,7 @@ if (use_csv_for_sportsline && file.exists(file_path)) {
 }
 
 cat("\n===== PROPOSED SOLUTION =====\n")
-cat("During blackout window (11 PM - 2 AM):\n")
+cat("During blackout window (noon - 2 AM):\n")
 cat("1. Load CSV for expected skins data ✓ (already implemented)\n")
 cat("2. Also load GAME RESULTS from the CSV ✗ (NOT implemented)\n")
 cat("3. DO NOT scrape plaintextsports.com during blackout ✗ (currently scrapes anyway)\n")
@@ -394,7 +394,7 @@ if (use_csv_for_sportsline) {
 }
 
 cat("**TEST THIS DIAGNOSTIC:**\n")
-cat("- Run between 11 PM - 2 AM to see blackout issues\n")
-cat("- Run between 2 AM - 11 PM to see normal operation\n")
+cat("- Run between noon and 2 AM to see blackout issues\n")
+cat("- Run between 2 AM - noon to see normal operation\n")
 cat("- Compare the team lists in each step to spot mismatches\n")
 ```
