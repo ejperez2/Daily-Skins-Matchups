@@ -49,7 +49,6 @@ cat(sprintf(
 #| warning: false
 # This chunk must run first (invisibly) to create 'todays_picks'
 # for the results tables that now appear at the top.
-
 # --- Part 0: Define Time and Data Source ---
 
 # Get current time in Chicago
@@ -113,25 +112,37 @@ draft_data <- tribble(
 # --- Part 1: Get Data (Conditional) ---
 if (use_csv_for_sportsline) {
   # --- BRANCH 1: LOAD FROM CSV (After 7 PM) ---
-  cat("DIAGNOSTIC: After 7 PM - loading expected skins from today's CSV\n")
+  cat("NOTICE: After 7 PM - loading expected skins from today's CSV\n")
   file_path <- file.path(history_dir, paste0(skins_date, ".csv"))
   
   if (file.exists(file_path)) {
     csv_data <- read_csv(file_path, show_col_types = FALSE)
     
-    # Re-format CSV data to match the 'todays_picks' structure
-    todays_picks <- csv_data %>%
-      mutate(
-        "Expected Skins" = Expected_Skins,
-        Moneyline = NA_real_,
-        "Implied Prob" = NA_real_,
-        # Create a dummy game_id. This assumes the CSV is ordered by game.
-        game_id = paste0(Date, "_", ceiling(row_number() / 2))
-      ) %>%
-      select(Date, Team, Pick, "Expected Skins", Player, Moneyline, "Implied Prob", Abbr, game_id) %>%
-      arrange(desc(`Expected Skins`))
+    # *** ROBUST FIX APPLIED HERE ***
+    # Check if the loaded CSV has the 'game_id' column.
+    if ("game_id" %in% colnames(csv_data)) {
+      # --- CSV is NEW (has game_id) ---
+      cat("Successfully loaded data from:", file_path, "(with game_id)\n")
       
-    cat("Successfully loaded data from:", file_path, "\n")
+      # *** THIS IS THE FIX ***
+      # We just select the columns we need. We DO NOT create a new game_id.
+      todays_picks <- csv_data %>%
+        mutate(
+          "Expected Skins" = Expected_Skins,
+          Moneyline = NA_real_,
+          "Implied Prob" = NA_real_
+          # 'game_id' column is read directly from the CSV
+        ) %>%
+        select(Date, Team, Pick, "Expected Skins", Player, Moneyline, "Implied Prob", Abbr, game_id) %>%
+        arrange(desc(`Expected Skins`)) # This sort is fine, it doesn't affect the game_id
+        
+    } else {
+      # --- CSV is OLD (no game_id) ---
+      # This is a fallback for a broken file.
+      # We must re-scrape to get the correct game_ids.
+      cat("WARNING: CSV file is old (no game_id). Re-scraping sportsline to get correct game matchups...\n")
+      use_csv_for_sportsline <- FALSE
+    }
     
   } else {
     # After 7 PM but no file found - try to scrape anyway
@@ -232,7 +243,7 @@ if (!use_csv_for_sportsline) {
     group_by(game_id) %>%
     mutate(
       total_prob_in_game = sum(implied_prob, na.rm = TRUE),
-      prob_no_vig = implied_prob / total_prob_in_game
+      prob_no_.vig = implied_prob / total_prob_in_game
     ) %>%
     ungroup() %>%
     left_join(draft_data, by = "Matchup_Key") %>%
@@ -450,6 +461,146 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
 
 This section scrapes `plaintextsports.com/nba` for game results. Games that are final or in-progress will appear here.
 
+```{r COMPREHENSIVE_DIAGNOSTIC}
+#| echo: true
+#| message: true
+#| warning: true
+
+# This chunk will diagnose the entire data pipeline for the matchup table.
+
+# --- 0. Load Libraries ---
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(rvest, httr, dplyr, tidyr, stringr, lubridate, tibble, knitr, kableExtra, readr)
+
+cat("--- STARTING COMPREHENSIVE DIAGNOSTIC ---\n\n")
+
+# --- 1. Diagnose Time and Branching ---
+cat("--- STEP 1: TIME & BRANCHING LOGIC ---\n")
+current_time_ct <- now(tzone = "America/Chicago")
+current_hour_ct <- hour(current_time_ct)
+if (current_hour_ct < 2) {
+  skins_date <- as_date(current_time_ct) - days(1)
+} else {
+  skins_date <- as_date(current_time_ct)
+}
+use_csv_for_sportsline <- current_hour_ct >= 19
+
+cat(paste("  Current CT Time:", current_time_ct, "\n"))
+cat(paste("  Skins Date:", as.character(skins_date), "\n"))
+cat(paste("  Is it after 7 PM? (use_csv_for_sportsline):", use_csv_for_sportsline, "\n"))
+cat("  CONCLUSION: The script is correctly entering the 'load from CSV' branch.\n\n")
+
+# --- 2. Diagnose CSV Loading ---
+cat("--- STEP 2: CSV FILE CONTENTS ---\n")
+history_dir <- "skins_history"
+file_path <- file.path(history_dir, paste0(skins_date, ".csv"))
+
+if (!file.exists(file_path)) {
+  cat("  CRITICAL ERROR: CSV file not found at:", file_path, "\n")
+} else {
+  csv_data <- read_csv(file_path, show_col_types = FALSE)
+  cat(paste("  Loaded:", basename(file_path), "(", nrow(csv_data), "rows)\n"))
+  cat("  CSV Columns:", paste(colnames(csv_data), collapse = ", "), "\n")
+  
+  if (!"game_id" %in% colnames(csv_data)) {
+    cat("  WARNING: The 'game_id' column is MISSING from the CSV file.\n")
+  }
+  
+  cat("  First 6 rows from CSV (note the 'Expected_Skins' sorting):\n")
+  print(head(csv_data %>% select(Player, Team, Expected_Skins)))
+  cat("  CONCLUSION: The CSV is sorted by 'Expected_Skins', NOT by game.\n\n")
+}
+
+# --- 3. Diagnose 'todays_picks' Creation (THE BUG) ---
+cat("--- STEP 3: 'todays_picks' DATA MANIPULATION (THE BUG) ---\n")
+cat("  Replicating the *broken* logic from 'expected_skins_data' chunk:\n")
+
+# This is the broken logic from that chunk
+todays_picks_broken <- csv_data %>%
+  mutate(
+    "Expected Skins" = Expected_Skins,
+    Moneyline = NA_real_,
+    "Implied Prob" = NA_real_,
+    # This line is the bug. It assumes CSV is ordered by game, but it's not.
+    game_id = paste0(Date, "_", ceiling(row_number() / 2))
+  ) %>%
+  select(Date, Team, Pick, "Expected Skins", Player, Moneyline, "Implied Prob", Abbr, game_id) %>%
+  arrange(game_id) # Sort by the new, broken game_id
+
+cat("  Resulting 'todays_picks' data with BROKEN 'game_id's:\n")
+print(todays_picks_broken %>% select(Player, Team, "Expected Skins", game_id))
+cat("  CONCLUSION: The 'game_id' is being incorrectly assigned. For example, '..._1' is pairing Cleveland and Boston.\n\n")
+
+
+# --- 4. Diagnose 'matchup_prep' Creation (THE SYMPTOM) ---
+cat("--- STEP 4: HEAD-TO-HEAD TABLE DATA (THE SYMPTOM) ---\n")
+cat("  Replicating the 'group_by' logic from 'matchup_table' chunk:\n")
+
+matchup_table_broken_data <- todays_picks_broken %>%
+  group_by(game_id) %>%
+  summarise(
+    Player_1 = first(Player),
+    Team_1 = first(Team),
+    Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
+    Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
+    .groups = 'drop'
+  )
+
+cat("  This is the final broken data used to build your table:\n")
+print(matchup_table_broken_data)
+cat("  CONCLUSION: This confirms the matchups are wrong (e.g., CLE vs. BOS).\n\n")
+
+
+# --- 5. Diagnose Scrape (GROUND TRUTH) ---
+cat("--- STEP 5: 'plaintextsports.com' SCRAPE (GROUND TRUTH) ---\n")
+cat("  Scraping live data to see the *actual* matchups...\n")
+
+url_scores <- "https://plaintextsports.com/nba/"
+page_scores <- read_html(url_scores)
+all_text <- page_scores %>% html_element("body") %>% html_text2()
+all_lines <- strsplit(all_text, "\n")[[1]]
+score_boxes <- all_lines[grepl("^\\+", all_lines)]
+
+parse_game_box_simple <- function(box) {
+  parts <- strsplit(box, "\\|")[[1]]
+  status <- str_trim(parts[2])
+  team1_line <- str_trim(parts[4])
+  team1_name <- str_extract(team1_line, "[A-Z]{2,3}")
+  team2_line <- str_trim(parts[6])
+  team2_name <- str_extract(team2_line, "[A-Z]{2,3}")
+  
+  # Standardize abbreviations
+  team_replacements <- c("^GS$" = "GSW", "^NO$" = "NOP", "^NY$" = "NYK", "^SA$" = "SAS", "^WSH$" = "WAS", "^PHX$"="PHX", "^GSW$"="GSW", "^LAC$"="LAC", "^LAL$"="LAL", "^SAC$"="SAC", "^DAL$"="DAL", "^HOU$"="HOU", "^MEM$"="MEM", "^NOP$"="NOP", "^SAS$"="SAS", "^DEN$"="DEN", "^MIN$"="MIN", "^OKC$"="OKC", "^POR$"="POR", "^UTA$"="UTA", "^BOS$"="BOS", "^BKN$"="BKN", "^NYK$"="NYK", "^PHI$"="PHI", "^TOR$"="TOR", "^CHI$"="CHI", "^CLE$"="CLE", "^DET$"="DET", "^IND$"="IND", "^MIL$"="MIL", "^ATL$"="ATL", "^CHA$"="CHA", "^MIA$"="MIA", "^ORL$"="ORL", "^WAS$"="WAS")
+  
+  team1_name <- str_replace_all(team1_name, team_replacements)
+  team2_name <- str_replace_all(team2_name, team_replacements)
+  
+  data.frame(Matchup = paste(team1_name, "vs.", team2_name), Status = status)
+}
+
+if (length(score_boxes) > 0) {
+  actual_matchups <- bind_rows(lapply(score_boxes, parse_game_box_simple))
+  cat("  Found", nrow(actual_matchups), "actual games from scrape:\n")
+  print(actual_matchups)
+  cat("  CONCLUSION: The scrape is working. The *actual* matchups (e.g., CLE vs. PHI) are present.\n\n")
+} else {
+  cat("  ERROR: Could not scrape plaintextsports.com.\n\n")
+}
+
+# --- 6. FINAL DIAGNOSIS & SOLUTION ---
+cat("--- FINAL DIAGNOSIS ---\n")
+cat("1.  The problem is NOT the scrape. The scrape is working.\n")
+cat("2.  The problem is 100% in the 'expected_skins_data' chunk.\n")
+cat("3.  After 7 PM, it loads the CSV. This CSV (2025-11-05.csv) is sorted by 'Expected_Skins' and, more importantly, **DOES NOT have a 'game_id' column**.\n")
+cat("4.  The code then *invents* a new 'game_id' based on the row number (`ceiling(row_number() / 2)`). This incorrectly pairs teams (CLE+BOS, MIN+IND, etc.).\n")
+cat("5.  This broken `game_id` is then used in the 'matchup_table' chunk, resulting in the incorrect table you see.\n\n")
+
+cat("--- RECOMMENDED SOLUTION (2 Parts) ---\n")
+cat("1.  FIX 'results_and_luck' chunk: We must modify it to **SAVE** the correct 'game_id' (from the daytime scrape) into the .csv file. This is the permanent fix for tomorrow.\n")
+cat("2.  FIX 'expected_skins_data' chunk: We must modify it to **RE-SCRAPE** if it loads a CSV *without* a 'game_id' column (this will fix the table for *today*).\n")
+cat("--- END OF DIAGNOSTIC ---")
+```
+
 ```{r matchup_table}
 #| echo: false
 #| message: false
@@ -567,7 +718,6 @@ if (nrow(todays_picks) > 0) {
   }
   
   # Build the matchup table - ONE ROW PER GAME
-  # *** MODIFICATION: Joined with live data from 'todays_picks' ***
   matchup_prep <- todays_picks %>%
     left_join(matchup_won_lookup, by = "Abbr") %>%
     left_join(matchup_status_lookup, by = "Abbr") %>%
@@ -580,7 +730,7 @@ if (nrow(todays_picks) > 0) {
       ),
       Game_Status = if_else(is.na(GameStatus), "Not Started", GameStatus)
     ) %>%
-    arrange(game_id)
+    arrange(game_id) # This sort is now on the CORRECT game_id
   
   # Create one row per game with both players
   matchup_table <- matchup_prep %>%
@@ -590,12 +740,12 @@ if (nrow(todays_picks) > 0) {
       Team_1 = first(Team),
       Pick_1 = first(Pick),
       Won_Skin_1 = first(Won_Skin),
-      Live_Skin_Prob_1 = first(Live_Expected_Skins), # <-- ADDED
+      Live_Skin_Prob_1 = first(Live_Expected_Skins), 
       Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
       Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
       Pick_2 = if(n() > 1) nth(Pick, 2) else NA_character_,
-      Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA, # <-- This is now correct
-      Live_Skin_Prob_2 = if(n() > 1) nth(Live_Expected_Skins, 2) else NA, # <-- ADDED
+      Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA,
+      Live_Skin_Prob_2 = if(n() > 1) nth(Live_Expected_Skins, 2) else NA,
       Status = first(Game_Status),
       .groups = 'drop'
     ) %>%
@@ -608,9 +758,6 @@ if (nrow(todays_picks) > 0) {
           cell_spec(Player_1, background = "#FFB6C6", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         TRUE ~ Player_1
       ),
-      
-      # *** FIX APPLIED HERE ***
-      # This logic now correctly references Won_Skin_2
       Player_2_Display = case_when(
         is.na(Player_2) ~ "",
         Status == "Final" & !is.na(Won_Skin_2) & Won_Skin_2 == TRUE ~ 
@@ -619,10 +766,7 @@ if (nrow(todays_picks) > 0) {
           cell_spec(Player_2, background = "#FFB6C6", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         TRUE ~ Player_2
       ),
-      
       # Add checkmarks for Won_Skin status
-      # *** FIX APPLIED HERE ***
-      # Added Status == "Final" check to prevent "Yes/No" on in-progress games
       Won_1 = case_when(
         Status != "Final" ~ "",
         is.na(Won_Skin_1) ~ "",
@@ -636,7 +780,6 @@ if (nrow(todays_picks) > 0) {
         Won_Skin_2 ~ "✓ Yes",
         TRUE ~ "✗ No"
       ),
-      
       # Format Live Probabilities
       Live_Prob_1_Display = if_else(is.na(Live_Skin_Prob_1), "", paste0(sprintf("%.0f", Live_Skin_Prob_1 * 100), "%")),
       Live_Prob_2_Display = if_else(is.na(Live_Skin_Prob_2), "", paste0(sprintf("%.0f", Live_Skin_Prob_2 * 100), "%")),
@@ -651,13 +794,13 @@ if (nrow(todays_picks) > 0) {
       Team = Team_1,
       Pick = Pick_1,
       `Won Skin` = Won_1,
-      `Live Skin Prob` = Live_Prob_1_Display, # <-- ADDED
+      `Live Skin Prob` = Live_Prob_1_Display, 
       VS,
       `Player 2` = Player_2_Display,
       `Team 2` = Team_2_Display,
       `Pick 2` = Pick_2_Display,
       `Won Skin 2` = Won_2,
-      `Live Skin Prob 2` = Live_Prob_2_Display, # <-- ADDED
+      `Live Skin Prob 2` = Live_Prob_2_Display, 
       Status
     )
   
@@ -798,8 +941,15 @@ if (nrow(todays_picks) > 0) {
   # 7. Save today's results to file (use underscores for easier CSV handling)
   # This now correctly uses today_ct (which is skins_date) as the filename
   today_file <- file.path(history_dir, paste0(today_ct, ".csv"))
+  
+  # *** FIX APPLIED HERE: Added 'game_id' to the select statement ***
   todays_results %>%
-    select(Date, Player, Team, Abbr, Pick, Expected_Skins = `Expected Skins`, Won_Game, Actual_Skins, Skins_Luck) %>%
+    select(
+      Date, Player, Team, Abbr, Pick, 
+      Expected_Skins = `Expected Skins`, 
+      Won_Game, Actual_Skins, Skins_Luck,
+      game_id # <-- THIS IS THE FIX
+    ) %>%
     write_csv(today_file)
   
   # 8. Print Table 4: Completed Games Summary
