@@ -69,10 +69,10 @@ if (current_hour_ct < 2) {
 today_ct <- skins_date 
 current_year <- year(today_ct)
 
-# NEW APPROACH: Use CSV after 7 PM instead of complex blackout window
-# After 7 PM, use saved CSV data for expected skins (sportsline data)
-# Gambletron and plaintextsports will still be scraped for live updates
-use_csv_for_sportsline <- current_hour_ct >= 19  # 7 PM or later
+# *** FIX APPLIED HERE ***
+# This now defines the "use CSV" window from 11 PM (23) to 1:59 AM (hours 0, 1).
+# Scrapes live data at all other times (2 AM to 10:59 PM).
+use_csv_for_sportsline <- current_hour_ct >= 23 | current_hour_ct < 2 
 
 # Define draft_data (needs to be available for both branches)
 draft_data <- tribble(
@@ -111,49 +111,41 @@ draft_data <- tribble(
 
 # --- Part 1: Get Data (Conditional) ---
 if (use_csv_for_sportsline) {
-  # --- BRANCH 1: LOAD FROM CSV (After 7 PM) ---
-  cat("NOTICE: After 7 PM - loading expected skins from today's CSV\n")
+  # --- BRANCH 1: LOAD FROM CSV (11 PM - 2 AM) ---
+  cat("NOTICE: In blackout window (11pm-2am CT). Loading data from CSV.\n")
   file_path <- file.path(history_dir, paste0(skins_date, ".csv"))
   
   if (file.exists(file_path)) {
     csv_data <- read_csv(file_path, show_col_types = FALSE)
     
-    # *** ROBUST FIX APPLIED HERE ***
-    # Check if the loaded CSV has the 'game_id' column.
     if ("game_id" %in% colnames(csv_data)) {
       # --- CSV is NEW (has game_id) ---
       cat("Successfully loaded data from:", file_path, "(with game_id)\n")
-      
-      # *** THIS IS THE FIX ***
-      # We just select the columns we need. We DO NOT create a new game_id.
       todays_picks <- csv_data %>%
         mutate(
           "Expected Skins" = Expected_Skins,
           Moneyline = NA_real_,
           "Implied Prob" = NA_real_
-          # 'game_id' column is read directly from the CSV
         ) %>%
         select(Date, Team, Pick, "Expected Skins", Player, Moneyline, "Implied Prob", Abbr, game_id) %>%
-        arrange(desc(`Expected Skins`)) # This sort is fine, it doesn't affect the game_id
+        arrange(desc(`Expected Skins`))
         
     } else {
       # --- CSV is OLD (no game_id) ---
-      # This is a fallback for a broken file.
-      # We must re-scrape to get the correct game_ids.
       cat("WARNING: CSV file is old (no game_id). Re-scraping sportsline to get correct game matchups...\n")
       use_csv_for_sportsline <- FALSE
     }
     
   } else {
-    # After 7 PM but no file found - try to scrape anyway
-    cat("WARNING: After 7 PM but no CSV found. Attempting to scrape sportsline...\n")
+    # Blackout window, but no file found - try to scrape anyway
+    cat("WARNING: In blackout window, but no CSV found. Attempting to scrape sportsline...\n")
     use_csv_for_sportsline <- FALSE
   }
 }
 
 if (!use_csv_for_sportsline) {
-  # --- BRANCH 2: SCRAPE FROM WEB (Before 7 PM or if CSV missing) ---
-  cat("NOTICE: Scraping data from sportsline.com\n")
+  # --- BRANCH 2: SCRAPE FROM WEB (2 AM - 11 PM) ---
+  cat("NOTICE: Scraping live data from sportsline.com\n")
   
   # --- Part 1.1: Scrape Expected Odds ---
   url <- paste0("https://www.sportsline.com/nba/odds/money-line/",
@@ -243,7 +235,7 @@ if (!use_csv_for_sportsline) {
     group_by(game_id) %>%
     mutate(
       total_prob_in_game = sum(implied_prob, na.rm = TRUE),
-      prob_no_.vig = implied_prob / total_prob_in_game
+      prob_no_vig = implied_prob / total_prob_in_game
     ) %>%
     ungroup() %>%
     left_join(draft_data, by = "Matchup_Key") %>%
@@ -460,146 +452,6 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
 ## Today's Results & Skins Luck
 
 This section scrapes `plaintextsports.com/nba` for game results. Games that are final or in-progress will appear here.
-
-```{r COMPREHENSIVE_DIAGNOSTIC}
-#| echo: true
-#| message: true
-#| warning: true
-
-# This chunk will diagnose the entire data pipeline for the matchup table.
-
-# --- 0. Load Libraries ---
-if (!require("pacman")) install.packages("pacman")
-pacman::p_load(rvest, httr, dplyr, tidyr, stringr, lubridate, tibble, knitr, kableExtra, readr)
-
-cat("--- STARTING COMPREHENSIVE DIAGNOSTIC ---\n\n")
-
-# --- 1. Diagnose Time and Branching ---
-cat("--- STEP 1: TIME & BRANCHING LOGIC ---\n")
-current_time_ct <- now(tzone = "America/Chicago")
-current_hour_ct <- hour(current_time_ct)
-if (current_hour_ct < 2) {
-  skins_date <- as_date(current_time_ct) - days(1)
-} else {
-  skins_date <- as_date(current_time_ct)
-}
-use_csv_for_sportsline <- current_hour_ct >= 19
-
-cat(paste("  Current CT Time:", current_time_ct, "\n"))
-cat(paste("  Skins Date:", as.character(skins_date), "\n"))
-cat(paste("  Is it after 7 PM? (use_csv_for_sportsline):", use_csv_for_sportsline, "\n"))
-cat("  CONCLUSION: The script is correctly entering the 'load from CSV' branch.\n\n")
-
-# --- 2. Diagnose CSV Loading ---
-cat("--- STEP 2: CSV FILE CONTENTS ---\n")
-history_dir <- "skins_history"
-file_path <- file.path(history_dir, paste0(skins_date, ".csv"))
-
-if (!file.exists(file_path)) {
-  cat("  CRITICAL ERROR: CSV file not found at:", file_path, "\n")
-} else {
-  csv_data <- read_csv(file_path, show_col_types = FALSE)
-  cat(paste("  Loaded:", basename(file_path), "(", nrow(csv_data), "rows)\n"))
-  cat("  CSV Columns:", paste(colnames(csv_data), collapse = ", "), "\n")
-  
-  if (!"game_id" %in% colnames(csv_data)) {
-    cat("  WARNING: The 'game_id' column is MISSING from the CSV file.\n")
-  }
-  
-  cat("  First 6 rows from CSV (note the 'Expected_Skins' sorting):\n")
-  print(head(csv_data %>% select(Player, Team, Expected_Skins)))
-  cat("  CONCLUSION: The CSV is sorted by 'Expected_Skins', NOT by game.\n\n")
-}
-
-# --- 3. Diagnose 'todays_picks' Creation (THE BUG) ---
-cat("--- STEP 3: 'todays_picks' DATA MANIPULATION (THE BUG) ---\n")
-cat("  Replicating the *broken* logic from 'expected_skins_data' chunk:\n")
-
-# This is the broken logic from that chunk
-todays_picks_broken <- csv_data %>%
-  mutate(
-    "Expected Skins" = Expected_Skins,
-    Moneyline = NA_real_,
-    "Implied Prob" = NA_real_,
-    # This line is the bug. It assumes CSV is ordered by game, but it's not.
-    game_id = paste0(Date, "_", ceiling(row_number() / 2))
-  ) %>%
-  select(Date, Team, Pick, "Expected Skins", Player, Moneyline, "Implied Prob", Abbr, game_id) %>%
-  arrange(game_id) # Sort by the new, broken game_id
-
-cat("  Resulting 'todays_picks' data with BROKEN 'game_id's:\n")
-print(todays_picks_broken %>% select(Player, Team, "Expected Skins", game_id))
-cat("  CONCLUSION: The 'game_id' is being incorrectly assigned. For example, '..._1' is pairing Cleveland and Boston.\n\n")
-
-
-# --- 4. Diagnose 'matchup_prep' Creation (THE SYMPTOM) ---
-cat("--- STEP 4: HEAD-TO-HEAD TABLE DATA (THE SYMPTOM) ---\n")
-cat("  Replicating the 'group_by' logic from 'matchup_table' chunk:\n")
-
-matchup_table_broken_data <- todays_picks_broken %>%
-  group_by(game_id) %>%
-  summarise(
-    Player_1 = first(Player),
-    Team_1 = first(Team),
-    Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
-    Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
-    .groups = 'drop'
-  )
-
-cat("  This is the final broken data used to build your table:\n")
-print(matchup_table_broken_data)
-cat("  CONCLUSION: This confirms the matchups are wrong (e.g., CLE vs. BOS).\n\n")
-
-
-# --- 5. Diagnose Scrape (GROUND TRUTH) ---
-cat("--- STEP 5: 'plaintextsports.com' SCRAPE (GROUND TRUTH) ---\n")
-cat("  Scraping live data to see the *actual* matchups...\n")
-
-url_scores <- "https://plaintextsports.com/nba/"
-page_scores <- read_html(url_scores)
-all_text <- page_scores %>% html_element("body") %>% html_text2()
-all_lines <- strsplit(all_text, "\n")[[1]]
-score_boxes <- all_lines[grepl("^\\+", all_lines)]
-
-parse_game_box_simple <- function(box) {
-  parts <- strsplit(box, "\\|")[[1]]
-  status <- str_trim(parts[2])
-  team1_line <- str_trim(parts[4])
-  team1_name <- str_extract(team1_line, "[A-Z]{2,3}")
-  team2_line <- str_trim(parts[6])
-  team2_name <- str_extract(team2_line, "[A-Z]{2,3}")
-  
-  # Standardize abbreviations
-  team_replacements <- c("^GS$" = "GSW", "^NO$" = "NOP", "^NY$" = "NYK", "^SA$" = "SAS", "^WSH$" = "WAS", "^PHX$"="PHX", "^GSW$"="GSW", "^LAC$"="LAC", "^LAL$"="LAL", "^SAC$"="SAC", "^DAL$"="DAL", "^HOU$"="HOU", "^MEM$"="MEM", "^NOP$"="NOP", "^SAS$"="SAS", "^DEN$"="DEN", "^MIN$"="MIN", "^OKC$"="OKC", "^POR$"="POR", "^UTA$"="UTA", "^BOS$"="BOS", "^BKN$"="BKN", "^NYK$"="NYK", "^PHI$"="PHI", "^TOR$"="TOR", "^CHI$"="CHI", "^CLE$"="CLE", "^DET$"="DET", "^IND$"="IND", "^MIL$"="MIL", "^ATL$"="ATL", "^CHA$"="CHA", "^MIA$"="MIA", "^ORL$"="ORL", "^WAS$"="WAS")
-  
-  team1_name <- str_replace_all(team1_name, team_replacements)
-  team2_name <- str_replace_all(team2_name, team_replacements)
-  
-  data.frame(Matchup = paste(team1_name, "vs.", team2_name), Status = status)
-}
-
-if (length(score_boxes) > 0) {
-  actual_matchups <- bind_rows(lapply(score_boxes, parse_game_box_simple))
-  cat("  Found", nrow(actual_matchups), "actual games from scrape:\n")
-  print(actual_matchups)
-  cat("  CONCLUSION: The scrape is working. The *actual* matchups (e.g., CLE vs. PHI) are present.\n\n")
-} else {
-  cat("  ERROR: Could not scrape plaintextsports.com.\n\n")
-}
-
-# --- 6. FINAL DIAGNOSIS & SOLUTION ---
-cat("--- FINAL DIAGNOSIS ---\n")
-cat("1.  The problem is NOT the scrape. The scrape is working.\n")
-cat("2.  The problem is 100% in the 'expected_skins_data' chunk.\n")
-cat("3.  After 7 PM, it loads the CSV. This CSV (2025-11-05.csv) is sorted by 'Expected_Skins' and, more importantly, **DOES NOT have a 'game_id' column**.\n")
-cat("4.  The code then *invents* a new 'game_id' based on the row number (`ceiling(row_number() / 2)`). This incorrectly pairs teams (CLE+BOS, MIN+IND, etc.).\n")
-cat("5.  This broken `game_id` is then used in the 'matchup_table' chunk, resulting in the incorrect table you see.\n\n")
-
-cat("--- RECOMMENDED SOLUTION (2 Parts) ---\n")
-cat("1.  FIX 'results_and_luck' chunk: We must modify it to **SAVE** the correct 'game_id' (from the daytime scrape) into the .csv file. This is the permanent fix for tomorrow.\n")
-cat("2.  FIX 'expected_skins_data' chunk: We must modify it to **RE-SCRAPE** if it loads a CSV *without* a 'game_id' column (this will fix the table for *today*).\n")
-cat("--- END OF DIAGNOSTIC ---")
-```
 
 ```{r matchup_table}
 #| echo: false
