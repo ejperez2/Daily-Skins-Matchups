@@ -1,5 +1,5 @@
 ---
-title: "Today's NBA Skins Picks"
+title: "Today's Skins"
 format:
   html:
     self-contained: true
@@ -717,6 +717,92 @@ if (nrow(todays_picks) > 0) {
 }
 ```
 
+```{r zero_sum_table}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Create Zero-Sum Matchups Table
+if (nrow(todays_picks) > 0) {
+  
+  # Identify zero-sum matchups
+  zero_sum_games <- todays_picks %>%
+    group_by(game_id) %>%
+    filter(
+      n() == 2,  # Exactly 2 teams in the game
+      (all(Pick == "W") | all(Pick == "L"))  # Both W or both L
+    ) %>%
+    ungroup()
+  
+  if (nrow(zero_sum_games) > 0) {
+    # Build zero-sum table
+    zero_sum_table <- zero_sum_games %>%
+      group_by(game_id) %>%
+      summarise(
+        Player_1 = first(Player),
+        Team_1 = first(Team),
+        Pick_1 = first(Pick),
+        Expected_1 = first(`Expected Skins`),
+        Won_Skin_1 = first(Won_Skin),
+        Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
+        Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
+        Pick_2 = if(n() > 1) nth(Pick, 2) else NA_character_,
+        Expected_2 = if(n() > 1) nth(`Expected Skins`, 2) else NA_real_,
+        Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA,
+        Status = first(Game_Status),
+        .groups = 'drop'
+      ) %>%
+      mutate(
+        # Apply color-coding to Player columns
+        Player_1_Display = case_when(
+          Status == "Final" & !is.na(Won_Skin_1) & Won_Skin_1 ~ 
+            cell_spec(Player_1, background = "#90EE90", color = "#000000 !important", 
+                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+          Status == "Final" & !is.na(Won_Skin_1) & !Won_Skin_1 ~ 
+            cell_spec(Player_1, background = "#FFB6C6", color = "#000000 !important", 
+                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+          TRUE ~ Player_1
+        ),
+        Player_2_Display = case_when(
+          is.na(Player_2) ~ "",
+          Status == "Final" & !is.na(Won_Skin_2) & Won_Skin_2 ~ 
+            cell_spec(Player_2, background = "#90EE90", color = "#000000 !important", 
+                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+          Status == "Final" & !is.na(Won_Skin_2) & !Won_Skin_2 ~ 
+            cell_spec(Player_2, background = "#FFB6C6", color = "#000000 !important", 
+                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+          TRUE ~ Player_2
+        )
+      ) %>%
+      select(
+        `Player 1` = Player_1_Display,
+        `Team 1` = Team_1,
+        `Pick 1` = Pick_1,
+        `Expected Skins 1` = Expected_1,
+        `Player 2` = Player_2_Display,
+        `Team 2` = Team_2,
+        `Pick 2` = Pick_2,
+        `Expected Skins 2` = Expected_2
+      )
+    
+    cat("\n\n")
+    knitr::kable(
+      zero_sum_table,
+      digits = 2,
+      align = 'c',
+      caption = "Zero-Sum Matchups (Max 1 Skin Available)",
+      escape = FALSE,
+      format = "html"
+    ) %>%
+      kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+      column_spec(c(4, 8), bold = TRUE)
+  }
+  
+} else {
+  cat("")
+}
+```
+
 ```{r results_and_luck}
 #| echo: false
 #| message: false
@@ -861,16 +947,30 @@ if (nrow(todays_picks) > 0) {
   # 8. Print Table 4: Completed Games Summary
   completed_games_table <- todays_results %>%
     filter(!is.na(Won_Game)) %>%
+    mutate(
+      # Apply color-coding to Player column
+      Player_Display = case_when(
+        Won_Skin == TRUE ~ 
+          cell_spec(Player, background = "#90EE90", color = "#000000 !important", 
+                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+        Won_Skin == FALSE ~ 
+          cell_spec(Player, background = "#FFB6C6", color = "#000000 !important", 
+                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+        TRUE ~ Player
+      ),
+      # Convert Won_Game to character for consistency with total row
+      Won_Game_Display = as.character(Won_Game)
+    ) %>%
     select(
-      Player,
+      Player = Player_Display,
       Team,
       Pick,
-      `Won Game?` = Won_Game,
+      `Won Game?` = Won_Game_Display,
       `Actual Skins` = Actual_Skins,
       `Expected Skins`,
       `Skins Luck` = Skins_Luck
     ) %>%
-    arrange(Player, Team)
+    arrange(Team)
   
   if (nrow(completed_games_table) > 0) {
     # Add TOTAL row
@@ -878,17 +978,17 @@ if (nrow(todays_picks) > 0) {
       Player = "TOTAL",
       Team = "",
       Pick = "",
-      `Won Game?` = NA,
-      `Actual Skins` = sum(completed_games_table$`Actual Skins`, na.rm = TRUE),
-      `Expected Skins` = sum(completed_games_table$`Expected Skins`, na.rm = TRUE),
-      `Skins Luck` = sum(completed_games_table$`Skins Luck`, na.rm = TRUE),
+      `Won Game?` = "",
+      `Actual Skins` = sum(todays_results %>% filter(!is.na(Won_Game)) %>% pull(Actual_Skins), na.rm = TRUE),
+      `Expected Skins` = sum(todays_results %>% filter(!is.na(Won_Game)) %>% pull(`Expected Skins`), na.rm = TRUE),
+      `Skins Luck` = sum(todays_results %>% filter(!is.na(Won_Game)) %>% pull(Skins_Luck), na.rm = TRUE),
       check.names = FALSE,
       stringsAsFactors = FALSE
     )
     
     completed_games_with_total <- bind_rows(completed_games_table, total_row)
     
-    knitr::kable(completed_games_with_total, digits = 1, align = 'c', caption = "Skins Results for Completed Games") %>%
+    knitr::kable(completed_games_with_total, digits = 1, align = 'c', caption = "Skins Results for Completed Games", escape = FALSE, format = "html") %>%
       kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
       column_spec(c(5, 7), bold = TRUE) %>%
       row_spec(nrow(completed_games_with_total), bold = TRUE, background = "#444444")
@@ -915,6 +1015,33 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
       Cumulative_Live_Expected = if_else(!is.na(Won_Game), Actual_Skins, Live_Expected_Skins)
     )
   
+  # Identify self zero-sum matchups (same player, both teams in same game)
+  self_zero_sum_players <- todays_results_with_cumulative %>%
+    group_by(game_id, Player) %>%
+    filter(n() >= 2) %>%
+    pull(Player) %>%
+    unique()
+  
+  # Calculate Perfect Skins % for each player
+  perfect_skins_calc <- todays_results_with_cumulative %>%
+    group_by(Player) %>%
+    summarise(
+      num_games = n(),
+      perfect_prob = prod(Cumulative_Live_Expected, na.rm = TRUE),
+      .groups = 'drop'
+    ) %>%
+    mutate(
+      `Perfect Skins %` = case_when(
+        # If player has self zero-sum matchup, 0%
+        Player %in% self_zero_sum_players ~ 0,
+        # If player has less than 5 games, 0%
+        num_games < 5 ~ 0,
+        # Otherwise, multiply live expected skins probabilities and convert to %
+        TRUE ~ perfect_prob * 100
+      )
+    ) %>%
+    select(Player, `Perfect Skins %`)
+  
   final_player_summary <- todays_results_with_cumulative %>%
     group_by(Player) %>%
     summarise(
@@ -927,13 +1054,15 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
     mutate(
       `Live Skins Luck` = `Live Expected Skins` - `Total Expected Skins`
     ) %>%
+    left_join(perfect_skins_calc, by = "Player") %>%
     select(
       Player, 
       `Total Expected Skins`, 
       `Live Expected Skins`,
       `Total Actual Skins`, 
       `Skins Luck`, 
-      `Live Skins Luck`
+      `Live Skins Luck`,
+      `Perfect Skins %`
     ) %>%
     arrange(desc(`Skins Luck`)) %>%
     mutate(
@@ -954,7 +1083,8 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
       `Live Expected Skins`,
       `Total Actual Skins`,
       `Skins Luck`,
-      `Live Skins Luck`
+      `Live Skins Luck`,
+      `Perfect Skins %`
     )
   
   # Add TOTAL row
@@ -966,6 +1096,7 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
     `Skins Luck` = sum(todays_results_with_cumulative$Skins_Luck, na.rm = TRUE),
     `Live Skins Luck` = sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE) - 
                          sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE),
+    `Perfect Skins %` = NA_real_,
     check.names = FALSE,
     stringsAsFactors = FALSE
   )
@@ -981,7 +1112,7 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
     format = "html"
   ) %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(c(5, 6), bold = TRUE) %>%
+    column_spec(c(5, 6, 7), bold = TRUE) %>%
     row_spec(nrow(final_player_summary_with_total), bold = TRUE, background = "#444444")
 }
 ```
@@ -1502,4 +1633,3 @@ p2 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Expected, color = Player, 
 
 print(p2)
 ```
-
