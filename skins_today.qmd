@@ -612,6 +612,10 @@ if (nrow(todays_picks) > 0) {
   
   # Build the matchup table - ONE ROW PER GAME
   matchup_prep <- todays_picks %>%
+    mutate(
+      # Calculate cumulative Live Expected Skins (completed games use Actual_Skins)
+      Cumulative_Live_Expected = if_else(!is.na(Won_Game), Actual_Skins, Live_Expected_Skins)
+    ) %>%
     arrange(game_id)
   
   # Create one row per game with both players
@@ -622,15 +626,27 @@ if (nrow(todays_picks) > 0) {
       Team_1 = first(Team),
       Pick_1 = first(Pick),
       Won_Skin_1 = first(Won_Skin),
-      Live_Skin_Prob_1 = first(Live_Expected_Skins), 
+      Live_Skin_Prob_1 = first(Cumulative_Live_Expected), 
       Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
       Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
       Pick_2 = if(n() > 1) nth(Pick, 2) else NA_character_,
       Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA,
-      Live_Skin_Prob_2 = if(n() > 1) nth(Live_Expected_Skins, 2) else NA,
+      Live_Skin_Prob_2 = if(n() > 1) nth(Cumulative_Live_Expected, 2) else NA,
       Status = first(Game_Status),
       .groups = 'drop'
     ) %>%
+    mutate(
+      # Create sort order for status
+      status_order = case_when(
+        Status == "Final" ~ 1,
+        str_detect(Status, "Q4") ~ 2,
+        str_detect(Status, "Q3") ~ 3,
+        str_detect(Status, "Q2") ~ 4,
+        str_detect(Status, "Q1") ~ 5,
+        TRUE ~ 6  # Not Started and other
+      )
+    ) %>%
+    arrange(status_order, game_id) %>%
     mutate(
       # Format player names with color highlighting
       Player_1_Display = case_when(
@@ -893,11 +909,17 @@ if (nrow(todays_picks) > 0) {
 # Print Table 5: Final Player Summary
 if (exists("todays_results") && nrow(todays_results) > 0) {
   
-  final_player_summary <- todays_results %>%
+  # Calculate cumulative live expected skins
+  todays_results_with_cumulative <- todays_results %>%
+    mutate(
+      Cumulative_Live_Expected = if_else(!is.na(Won_Game), Actual_Skins, Live_Expected_Skins)
+    )
+  
+  final_player_summary <- todays_results_with_cumulative %>%
     group_by(Player) %>%
     summarise(
       `Total Expected Skins` = sum(`Expected Skins`, na.rm = TRUE),
-      `Live Expected Skins` = sum(Live_Expected_Skins, na.rm = TRUE),
+      `Live Expected Skins` = sum(Cumulative_Live_Expected, na.rm = TRUE),
       `Total Actual Skins` = sum(Actual_Skins, na.rm = TRUE),
       `Skins Luck` = sum(Skins_Luck, na.rm = TRUE),
       .groups = 'drop'
@@ -913,16 +935,37 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
       `Skins Luck`, 
       `Live Skins Luck`
     ) %>%
-    arrange(desc(`Skins Luck`))
+    arrange(desc(`Skins Luck`)) %>%
+    mutate(
+      # Apply color coding to Player column
+      Player_Display = case_when(
+        `Skins Luck` > 0 ~ 
+          cell_spec(Player, background = "#90EE90", color = "#000000 !important", 
+                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+        `Skins Luck` < 0 ~ 
+          cell_spec(Player, background = "#FFB6C6", color = "#000000 !important", 
+                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+        TRUE ~ Player
+      )
+    ) %>%
+    select(
+      Player = Player_Display,
+      `Total Expected Skins`,
+      `Live Expected Skins`,
+      `Total Actual Skins`,
+      `Skins Luck`,
+      `Live Skins Luck`
+    )
   
   # Add TOTAL row
   total_row <- data.frame(
     Player = "TOTAL",
-    `Total Expected Skins` = sum(final_player_summary$`Total Expected Skins`, na.rm = TRUE),
-    `Live Expected Skins` = sum(final_player_summary$`Live Expected Skins`, na.rm = TRUE),
-    `Total Actual Skins` = sum(final_player_summary$`Total Actual Skins`, na.rm = TRUE),
-    `Skins Luck` = sum(final_player_summary$`Skins Luck`, na.rm = TRUE),
-    `Live Skins Luck` = sum(final_player_summary$`Live Skins Luck`, na.rm = TRUE),
+    `Total Expected Skins` = sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE),
+    `Live Expected Skins` = sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE),
+    `Total Actual Skins` = sum(todays_results_with_cumulative$Actual_Skins, na.rm = TRUE),
+    `Skins Luck` = sum(todays_results_with_cumulative$Skins_Luck, na.rm = TRUE),
+    `Live Skins Luck` = sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE) - 
+                         sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE),
     check.names = FALSE,
     stringsAsFactors = FALSE
   )
@@ -933,7 +976,9 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
     final_player_summary_with_total,
     digits = 1,
     align = 'c',
-    caption = "Final Player Summary (Expected vs. Actual)"
+    caption = "Final Player Summary (Expected vs. Actual)",
+    escape = FALSE,
+    format = "html"
   ) %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
     column_spec(c(5, 6), bold = TRUE) %>%
@@ -984,11 +1029,12 @@ if (nrow(todays_picks) > 0) {
       mutate(Player_Display = Player)
   }
   
-  # Format the table
+  # Format the table and sort by Player, then Expected Skins within Player
   team_table_data <- team_table_data %>%
     mutate(`Implied Prob` = if_else(is.na(`Implied Prob`), "", paste0(sprintf("%.0f", `Implied Prob` * 100), "%"))) %>%
-    select(Team, Pick, `Expected Skins`, Player = Player_Display, Moneyline, `Implied Prob`) %>%
-    arrange(Team)
+    select(Team, Pick, `Expected Skins`, Player = Player_Display, Moneyline, `Implied Prob`, Player_Raw = Player) %>%
+    arrange(Player_Raw, desc(`Expected Skins`)) %>%
+    select(-Player_Raw)
   
   knitr::kable(
     team_table_data, 
@@ -1456,3 +1502,4 @@ p2 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Expected, color = Player, 
 
 print(p2)
 ```
+
