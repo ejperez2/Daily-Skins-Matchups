@@ -4,26 +4,26 @@ name: Render and Publish Skins Page
 on:
   # Schedule based on UTC time
   schedule:
-  #- cron: '*/20 * * * *'
+  - cron: '*/20 * * * *'
     # --- CURRENT SCHEDULE (CST / UTC-6) ---
     # 7:15 AM CST
-  - cron: '15 13 * * *'
+#  - cron: '15 13 * * *'
     # 12:00 PM CST (Noon)
-  - cron: '0 18 * * *'
+#  - cron: '0 18 * * *'
     
                           # 6:00 PM - 12:40 AM CST (Every 20 mins)
                         # (00:00 - 06:40 UTC)
                                    #  - cron: '*/20 0-6 * * *'
                                  # - cron: '*/20 17-23 * * *'
    # Use 23:59 UTC as a proxy for 00:00
-  - cron: '59 23 * * *'        # 5:59 PM CST (1 min before 6)
-  - cron: '19,39,59 0 * * *'   # 6:19, 6:39, 6:59 PM CST
-  - cron: '19,39,59 1 * * *'   # 7:19, 7:39, 7:59 PM CST
-  - cron: '*/20 2-6 * * *'     # 8:00 PM onwards
+#  - cron: '59 23 * * *'        # 5:59 PM CST (1 min before 6)
+#  - cron: '19,39,59 0 * * *'   # 6:19, 6:39, 6:59 PM CST
+#  - cron: '19,39,59 1 * * *'   # 7:19, 7:39, 7:59 PM CST
+#  - cron: '*/20 2-6 * * *'     # 8:00 PM onwards
 
     # 1:00 AM, 1:20 AM, 1:30 AM CST
     # (07:00, 07:20, 07:30 UTC)
-  - cron: '0,20,30 7 * * *'
+#  - cron: '0,20,30 7 * * *'
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
