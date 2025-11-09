@@ -1446,10 +1446,14 @@ if (nrow(ytd_data) > 0) {
       Cumulative_Skins_Luck = coalesce(Cumulative_Skins_Luck_baseline, 0) + coalesce(Cumulative_Skins_Luck_new, 0)
     ) %>%
     select(Player, Games, Total_Expected_Skins, Total_Actual_Skins, Cumulative_Skins_Luck) %>%
-    mutate(Avg_Skins_Luck_per_Game = if_else(Games == 0, 0, Cumulative_Skins_Luck / Games)) %>%
+    mutate(
+      Expected_Skins_Pct = if_else(Games == 0, 0, (Total_Expected_Skins / Games) * 100),
+      Avg_Skins_Luck_per_Game = if_else(Games == 0, 0, Cumulative_Skins_Luck / Games)
+    ) %>%
     rename(
       `Total Expected Skins` = Total_Expected_Skins, `Total Actual Skins` = Total_Actual_Skins,
-      `Cumulative Skins Luck` = Cumulative_Skins_Luck, `Avg Skins Luck per Game` = Avg_Skins_Luck_per_Game
+      `Cumulative Skins Luck` = Cumulative_Skins_Luck, `Expected Skins %` = Expected_Skins_Pct,
+      `Avg Skins Luck per Game` = Avg_Skins_Luck_per_Game
     ) %>%
     arrange(desc(`Cumulative Skins Luck`))
   
@@ -1458,6 +1462,7 @@ if (nrow(ytd_data) > 0) {
   total_expected <- sum(ytd_summary$`Total Expected Skins`)
   total_actual <- sum(ytd_summary$`Total Actual Skins`)
   total_luck <- sum(ytd_summary$`Cumulative Skins Luck`)
+  weighted_avg_expected_pct <- if_else(total_games == 0, 0, (total_expected / total_games) * 100)
   weighted_avg_luck <- if_else(total_games == 0, 0, total_luck / total_games)
   
   total_row <- data.frame(
@@ -1466,6 +1471,7 @@ if (nrow(ytd_data) > 0) {
     `Total Expected Skins` = total_expected,
     `Total Actual Skins` = total_actual,
     `Cumulative Skins Luck` = total_luck,
+    `Expected Skins %` = weighted_avg_expected_pct,
     `Avg Skins Luck per Game` = weighted_avg_luck,
     check.names = FALSE
   )
@@ -1474,15 +1480,19 @@ if (nrow(ytd_data) > 0) {
   
   knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats"), escape = FALSE, format = "html") %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(5, bold = TRUE) %>%
+    column_spec(c(5, 6), bold = TRUE) %>%
     row_spec(nrow(ytd_summary_with_total), bold = TRUE, background = "#444444")
 
 } else {
   ytd_summary <- ytd_baseline %>%
-    mutate(Avg_Skins_Luck_per_Game = if_else(Games == 0, 0, Cumulative_Skins_Luck / Games)) %>%
+    mutate(
+      Expected_Skins_Pct = if_else(Games == 0, 0, (Total_Expected_Skins / Games) * 100),
+      Avg_Skins_Luck_per_Game = if_else(Games == 0, 0, Cumulative_Skins_Luck / Games)
+    ) %>%
     rename(
       `Total Expected Skins` = Total_Expected_Skins, `Total Actual Skins` = Total_Actual_Skins,
-      `Cumulative Skins Luck` = Cumulative_Skins_Luck, `Avg Skins Luck per Game` = Avg_Skins_Luck_per_Game
+      `Cumulative Skins Luck` = Cumulative_Skins_Luck, `Expected Skins %` = Expected_Skins_Pct,
+      `Avg Skins Luck per Game` = Avg_Skins_Luck_per_Game
     ) %>%
     arrange(desc(`Cumulative Skins Luck`))
   
@@ -1491,6 +1501,7 @@ if (nrow(ytd_data) > 0) {
   total_expected <- sum(ytd_summary$`Total Expected Skins`)
   total_actual <- sum(ytd_summary$`Total Actual Skins`)
   total_luck <- sum(ytd_summary$`Cumulative Skins Luck`)
+  weighted_avg_expected_pct <- if_else(total_games == 0, 0, (total_expected / total_games) * 100)
   weighted_avg_luck <- if_else(total_games == 0, 0, total_luck / total_games)
   
   total_row <- data.frame(
@@ -1499,6 +1510,7 @@ if (nrow(ytd_data) > 0) {
     `Total Expected Skins` = total_expected,
     `Total Actual Skins` = total_actual,
     `Cumulative Skins Luck` = total_luck,
+    `Expected Skins %` = weighted_avg_expected_pct,
     `Avg Skins Luck per Game` = weighted_avg_luck,
     check.names = FALSE
   )
@@ -1507,7 +1519,7 @@ if (nrow(ytd_data) > 0) {
     
   knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats (Baseline)"), escape = FALSE, format = "html") %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(5, bold = TRUE) %>%
+    column_spec(c(5, 6), bold = TRUE) %>%
     row_spec(nrow(ytd_summary_with_total), bold = TRUE, background = "#444444")
 }
 ```
