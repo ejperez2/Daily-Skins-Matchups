@@ -1344,7 +1344,9 @@ if (file.exists(yesterday_file)) {
           yesterday_player_summary_with_total,
           digits = 1,
           align = 'c',
-          caption = paste0(format(yesterday_ct, "%B %d"), " - Player Summary")
+          caption = paste0(format(yesterday_ct, "%B %d"), " - Player Summary"),
+          escape = FALSE,
+          format = "html"
         ) %>%
           kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
           column_spec(4, bold = TRUE) %>%
@@ -1470,7 +1472,7 @@ if (nrow(ytd_data) > 0) {
   
   ytd_summary_with_total <- bind_rows(ytd_summary, total_row)
   
-  knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats")) %>%
+  knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats"), escape = FALSE, format = "html") %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
     column_spec(5, bold = TRUE) %>%
     row_spec(nrow(ytd_summary_with_total), bold = TRUE, background = "#444444")
@@ -1503,7 +1505,7 @@ if (nrow(ytd_data) > 0) {
   
   ytd_summary_with_total <- bind_rows(ytd_summary, total_row)
     
-  knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats (Baseline)")) %>%
+  knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats (Baseline)"), escape = FALSE, format = "html") %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
     column_spec(5, bold = TRUE) %>%
     row_spec(nrow(ytd_summary_with_total), bold = TRUE, background = "#444444")
