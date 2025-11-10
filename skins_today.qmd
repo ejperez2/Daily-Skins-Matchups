@@ -78,7 +78,7 @@ use_csv_for_sportsline <- current_hour_ct >= 23 | current_hour_ct < 2
 # Define draft_data (needs to be available for both branches)
 draft_data <- tribble(
   ~Team, ~Matchup_Key, ~abbr, ~skins_pick, ~player,
-  "Utah Jazz", "Jazz|Utah", "UTA", "L", "<u>Eristeo</u>",
+  "Utah Jazz", "Jazz|Utah", "UTA", "L", "Eristeo",
   "Oklahoma City Thunder", "Thunder|Oklahoma", "OKC", "W", "Matt",
   "Washington Wizards", "Wizards|Washington", "WAS", "L", "Brian",
   "Brooklyn Nets", "Nets|Brooklyn", "BKN", "L", "Adam",
@@ -87,11 +87,11 @@ draft_data <- tribble(
   "Denver Nuggets", "Nuggets|Denver", "DEN", "W", "Thomas",
   "New York Knicks", "Knicks|New York", "NYK", "W", "Adam",
   "Houston Rockets", "Rockets|Houston", "HOU", "W", "Kenneth",
-  "Phoenix Suns", "Suns|Phoenix", "PHX", "L", "<u>Eristeo</u>",
+  "Phoenix Suns", "Suns|Phoenix", "PHX", "L", "Eristeo",
   "New Orleans Pelicans", "Pelicans|New Orleans", "NOP", "L", "Matt",
   "Orlando Magic", "Magic|Orlando", "ORL", "W", "Kenneth",
   "Chicago Bulls", "Bulls|Chicago", "CHI", "L", "Thomas",
-  "Los Angeles Clippers", "Clippers|LA Clippers", "LAC", "W", "<u>Eristeo</u>",
+  "Los Angeles Clippers", "Clippers|LA Clippers", "LAC", "W", "Eristeo",
   "Minnesota Timberwolves", "Timberwolves|Minnesota", "MIN", "W", "Matt",
   "Portland Trail Blazers", "Trail Blazers|Portland", "POR", "L", "Kenneth",
   "Atlanta Hawks", "Hawks|Atlanta", "ATL", "W", "Adam",
@@ -99,12 +99,12 @@ draft_data <- tribble(
   "Golden State Warriors", "Warriors|Golden State", "GSW", "W", "Kenneth",
   "Sacramento Kings", "Kings|Sacramento", "SAC", "L", "Thomas",
   "Detroit Pistons", "Pistons|Detroit", "DET", "W", "Brian",
-  "Indiana Pacers", "Pacers|Indiana", "IND", "L", "<u>Eristeo</u>",
+  "Indiana Pacers", "Pacers|Indiana", "IND", "L", "Eristeo",
   "Miami Heat", "Heat|Miami", "MIA", "L", "Matt",
   "Philadelphia 76ers", "76ers|Philadelphia", "PHI", "W", "Matt",
   "Toronto Raptors", "Raptors|Toronto", "TOR", "L", "Brian",
   "Milwaukee Bucks", "Bucks|Milwaukee", "MIL", "W", "Brian",
-  "San Antonio Spurs", "Spurs|San Antonio", "SAS", "W", "<u>Eristeo</u>",
+  "San Antonio Spurs", "Spurs|San Antonio", "SAS", "W", "Eristeo",
   "Memphis Grizzlies", "Grizzlies|Memphis", "MEM", "W", "Kenneth",
   "Boston Celtics", "Celtics|Boston", "BOS", "W", "Adam",
   "Dallas Mavericks", "Mavericks|Dallas", "DAL", "W", "Thomas"
@@ -631,17 +631,17 @@ if (nrow(todays_picks) > 0) {
       # Format player names with color highlighting
       Player_1_Display = case_when(
         Status == "Final" & !is.na(Won_Skin_1) & Won_Skin_1 ~ 
-          cell_spec(Player_1, background = "#90EE90", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+          cell_spec(Player_1, background = "#90EE90", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         Status == "Final" & !is.na(Won_Skin_1) & !Won_Skin_1 ~ 
-          cell_spec(Player_1, background = "#FFB6C6", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+          cell_spec(Player_1, background = "#FFB6C6", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         TRUE ~ Player_1
       ),
       Player_2_Display = case_when(
         is.na(Player_2) ~ "",
         Status == "Final" & !is.na(Won_Skin_2) & Won_Skin_2 == TRUE ~ 
-          cell_spec(Player_2, background = "#90EE90", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+          cell_spec(Player_2, background = "#90EE90", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         Status == "Final" & !is.na(Won_Skin_2) & Won_Skin_2 == FALSE ~ 
-          cell_spec(Player_2, background = "#FFB6C6", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+          cell_spec(Player_2, background = "#FFB6C6", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         TRUE ~ Player_2
       ),
       # Add checkmarks for Won_Skin status
@@ -737,20 +737,20 @@ if (nrow(todays_picks) > 0) {
         Player_1_Display = case_when(
           Status == "Final" & !is.na(Won_Skin_1) & Won_Skin_1 ~ 
             cell_spec(Player_1, background = "#90EE90", color = "#000000 !important", 
-                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
           Status == "Final" & !is.na(Won_Skin_1) & !Won_Skin_1 ~ 
             cell_spec(Player_1, background = "#FFB6C6", color = "#000000 !important", 
-                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
           TRUE ~ Player_1
         ),
         Player_2_Display = case_when(
           is.na(Player_2) ~ "",
           Status == "Final" & !is.na(Won_Skin_2) & Won_Skin_2 ~ 
             cell_spec(Player_2, background = "#90EE90", color = "#000000 !important", 
-                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
           Status == "Final" & !is.na(Won_Skin_2) & !Won_Skin_2 ~ 
             cell_spec(Player_2, background = "#FFB6C6", color = "#000000 !important", 
-                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
           TRUE ~ Player_2
         )
       ) %>%
@@ -925,10 +925,10 @@ if (nrow(todays_picks) > 0) {
       Player_Display = case_when(
         Won_Skin == TRUE ~ 
           cell_spec(Player, background = "#90EE90", color = "#000000 !important", 
-                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         Won_Skin == FALSE ~ 
           cell_spec(Player, background = "#FFB6C6", color = "#000000 !important", 
-                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         TRUE ~ Player
       ),
       # Convert Won_Game to character for consistency with total row
@@ -1043,10 +1043,10 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
       Player_Display = case_when(
         `Skins Luck` > 0 ~ 
           cell_spec(Player, background = "#90EE90", color = "#000000 !important", 
-                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         `Skins Luck` < 0 ~ 
           cell_spec(Player, background = "#FFB6C6", color = "#000000 !important", 
-                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         TRUE ~ Player
       )
     ) %>%
@@ -1119,10 +1119,10 @@ if (nrow(todays_picks) > 0) {
         Player_Display = case_when(
           !is.na(Won_Skin) & Won_Skin == TRUE ~ 
             cell_spec(Player, background = "#90EE90", color = "#000000 !important", 
-                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
           !is.na(Won_Skin) & Won_Skin == FALSE ~ 
             cell_spec(Player, background = "#FFB6C6", color = "#000000 !important", 
-                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
           TRUE ~ Player
         )
       ) %>%
@@ -1256,20 +1256,20 @@ if (file.exists(yesterday_file)) {
           Player_1_Display = case_when(
             !is.na(Won_Skin_1) & Won_Skin_1 == TRUE ~ 
               cell_spec(Player_1, background = "#90EE90", color = "#000000 !important", 
-                        bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+                        bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
             !is.na(Won_Skin_1) & Won_Skin_1 == FALSE ~ 
               cell_spec(Player_1, background = "#FFB6C6", color = "#000000 !important", 
-                        bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+                        bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
             TRUE ~ Player_1
           ),
           Player_2_Display = case_when(
             is.na(Player_2) ~ "",
             !is.na(Won_Skin_2) & Won_Skin_2 == TRUE ~ 
               cell_spec(Player_2, background = "#90EE90", color = "#000000 !important", 
-                        bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+                        bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
             !is.na(Won_Skin_2) & Won_Skin_2 == FALSE ~ 
               cell_spec(Player_2, background = "#FFB6C6", color = "#000000 !important", 
-                        bold = TRUE, format = "html", extra_css = "color: #000000 !important;", escape = FALSE),
+                        bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
             TRUE ~ Player_2
           ),
           Won_1 = case_when(
