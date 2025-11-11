@@ -36,15 +36,6 @@ ts <- format(Sys.time(), "%A, %B %d, %Y at %I:%M %p %Z", tz = "America/Chicago")
 cat(paste0("<p style='font-size:14px; color:#999;'><strong>Last updated:</strong> ", ts, "</p>"))
 ```
 
-```{r explain-display, echo=FALSE, results='asis'}
-# Display season completion percentage
-cat(sprintf(
-  "<p style='font-size:14px; margin-top:0px; margin-bottom:16px;'>
-    <strong><a href='https://bdubcodes.net/posts/the-nba-skins-game'>Skins Game</a>:</strong> In this fantasy NBA game, players draft all 30 NBA teams. For each team, you must choose to root for their WINS or their LOSSES. If your chosen outcome happens (e.g., you picked 'losses' for the Spurs and they lose), you get a 'skin,' or a point. Whoever accumulates the most skins wins.</p>" 
-  )
-)
-```
-
 ```{r expected_skins_data}
 #| echo: false
 #| message: false
@@ -546,11 +537,276 @@ if (!"Live_Expected_Skins" %in% names(todays_picks)) {
 }
 ```
 
+```{r results_and_luck}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Only process results if we have games today
+if (nrow(todays_picks) > 0) {
+  
+  # Always scrape plaintextsports regardless of blackout window
+  # 1. Scrape plaintextsports.com for live game data
+  url_scores <- "https://plaintextsports.com/nba/"
+  page_scores <- read_html(url_scores)
+  
+  # Get all text from the body
+  all_text <- page_scores %>%
+    html_element("body") %>%
+    html_text2()
+  
+  # 2. Extract Game Blocks - Split into lines and get score boxes
+  all_lines <- strsplit(all_text, "\n")[[1]]
+  score_boxes <- all_lines[grepl("^\\+", all_lines)]
+  
+  # 3. Parse a single game box
+  parse_game_box <- function(box) {
+    # Split by "|" character
+    parts <- strsplit(box, "\\|")[[1]]
+    
+    # Extract status, teams, and scores
+    status <- str_trim(parts[2])
+    
+    # Team 1
+    team1_line <- str_trim(parts[4])
+    team1_name <- str_extract(team1_line, "[A-Z]{2,3}")
+    team1_score <- suppressWarnings(as.numeric(str_extract(team1_line, "[0-9]+$")))
+    
+    # Team 2
+    team2_line <- str_trim(parts[6])
+    team2_name <- str_extract(team2_line, "[A-Z]{2,3}")
+    team2_score <- suppressWarnings(as.numeric(str_extract(team2_line, "[0-9]+$")))
+    
+    # Determine if final
+    is_final <- grepl("Final", status, fixed = TRUE)
+    
+    # Determine if game is in progress
+    is_in_progress <- grepl("Q[1-4]|Half|OT|\\d+:\\d+", status) & !is_final
+    
+    # Return data frame
+    data.frame(
+      Team1 = team1_name,
+      Team2 = team2_name,
+      Score1 = team1_score,
+      Score2 = team2_score,
+      Status = status,
+      Finished = is_final,
+      InProgress = is_in_progress,
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  # 4. Parse all game boxes
+  if (length(score_boxes) > 0) {
+    all_game_results <- bind_rows(lapply(score_boxes, parse_game_box))
+  } else {
+    all_game_results <- data.frame()
+  }
+  
+  # 5. Standardize team abbreviations to match draft_data
+  team_replacements <- c(
+    "^GS$" = "GSW",
+    "^NO$" = "NOP",
+    "^NY$" = "NYK",
+    "^SA$" = "SAS",
+    "^WSH$" = "WAS"
+  )
+  
+  # Apply standardization
+  if (nrow(all_game_results) > 0) {
+    all_game_results <- all_game_results %>%
+      mutate(
+        Team1 = str_replace_all(Team1, team_replacements),
+        Team2 = str_replace_all(Team2, team_replacements)
+      )
+  }
+  
+  # 6. Create Won_Game lookup - only for finished games
+  final_team_results <- data.frame(Abbr = character(), Won_Game = logical(), stringsAsFactors = FALSE)
+  
+  if (nrow(all_game_results) > 0) {
+    finished_games <- all_game_results %>% filter(Finished == TRUE)
+    
+    if (nrow(finished_games) > 0) {
+      # Team 1 results
+      team1_results <- finished_games %>%
+        select(Abbr = Team1, PTS = Score1, Opp_PTS = Score2) %>%
+        mutate(Won_Game = PTS > Opp_PTS)
+      
+      # Team 2 results
+      team2_results <- finished_games %>%
+        select(Abbr = Team2, PTS = Score2, Opp_PTS = Score1) %>%
+        mutate(Won_Game = PTS > Opp_PTS)
+      
+      final_team_results <- bind_rows(team1_results, team2_results) %>%
+        select(Abbr, Won_Game)
+    }
+  }
+  
+  # 6. Create todays_results with actual outcomes
+  todays_results <- todays_picks %>%
+    left_join(final_team_results, by = "Abbr", suffix = c("", "_new")) %>%
+    mutate(
+      Won_Game = coalesce(Won_Game_new, Won_Game),
+      Actual_Skins = case_when(
+        Won_Game == TRUE & Pick == "W" ~ 1,
+        Won_Game == FALSE & Pick == "L" ~ 1,
+        is.na(Won_Game) ~ NA_real_,
+        TRUE ~ 0
+      ),
+      Skins_Luck = Actual_Skins - `Expected Skins`
+    ) %>%
+    select(-Won_Game_new)
+  
+  # 7. Save today's results to file (use underscores for easier CSV handling)
+  # This now correctly uses today_ct (which is skins_date) as the filename
+  today_file <- file.path(history_dir, paste0(today_ct, ".csv"))
+  
+  todays_results %>%
+    select(
+      Date, Player, Team, Abbr, Pick, 
+      Expected_Skins = `Expected Skins`, 
+      Won_Game, Actual_Skins, Skins_Luck,
+      game_id
+    ) %>%
+    write_csv(today_file)
+} else {
+  todays_results <- data.frame()
+}
+```
+
+---
+
+## Final Player Summary (Expected vs. Actual)
+
+```{r final_player_summary}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Print Final Player Summary
+if (exists("todays_results") && nrow(todays_results) > 0) {
+  
+  # Calculate cumulative live expected skins
+  todays_results_with_cumulative <- todays_results %>%
+    mutate(
+      Cumulative_Live_Expected = if_else(!is.na(Won_Game), Actual_Skins, Live_Expected_Skins)
+    )
+  
+  # Identify self zero-sum matchups (same player, both teams in same game)
+  self_zero_sum_players <- todays_results_with_cumulative %>%
+    group_by(game_id, Player) %>%
+    filter(n() >= 2) %>%
+    pull(Player) %>%
+    unique()
+  
+  # Calculate Perfect Skins % for each player
+  perfect_skins_calc <- todays_results_with_cumulative %>%
+    group_by(Player) %>%
+    summarise(
+      num_games = n(),
+      perfect_prob = prod(Cumulative_Live_Expected, na.rm = TRUE),
+      .groups = 'drop'
+    ) %>%
+    mutate(
+      `Perfect Skins %` = case_when(
+        # If player has self zero-sum matchup, 0%
+        Player %in% self_zero_sum_players ~ 0,
+        # If player has less than 5 games, 0%
+        num_games < 5 ~ 0,
+        # Otherwise, multiply live expected skins probabilities and convert to %
+        TRUE ~ perfect_prob * 100
+      )
+    ) %>%
+    select(Player, `Perfect Skins %`)
+  
+  final_player_summary <- todays_results_with_cumulative %>%
+    group_by(Player) %>%
+    summarise(
+      `Total Expected Skins` = sum(`Expected Skins`, na.rm = TRUE),
+      `Live Expected Skins` = sum(Cumulative_Live_Expected, na.rm = TRUE),
+      `Total Actual Skins` = sum(Actual_Skins, na.rm = TRUE),
+      `Skins Luck` = sum(Skins_Luck, na.rm = TRUE),
+      .groups = 'drop'
+    ) %>%
+    mutate(
+      `Live Skins Luck` = `Live Expected Skins` - `Total Expected Skins`
+    ) %>%
+    left_join(perfect_skins_calc, by = "Player") %>%
+    select(
+      Player, 
+      `Total Expected Skins`, 
+      `Live Expected Skins`,
+      `Total Actual Skins`, 
+      `Skins Luck`, 
+      `Live Skins Luck`,
+      `Perfect Skins %`
+    ) %>%
+    arrange(desc(`Skins Luck`)) %>%
+    mutate(
+      # Apply color coding to Player column
+      Player_Display = case_when(
+        `Skins Luck` > 0 ~ 
+          cell_spec(Player, background = "#90EE90", color = "#000000 !important", 
+                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+        `Skins Luck` < 0 ~ 
+          cell_spec(Player, background = "#FFB6C6", color = "#000000 !important", 
+                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+        TRUE ~ Player
+      ),
+      # Apply color coding to Live Skins Luck column - exclude values between -0.1 and 0.1
+      `Live Skins Luck Display` = case_when(
+        `Live Skins Luck` > 0.1 ~ 
+          cell_spec(sprintf("%.1f", `Live Skins Luck`), background = "#90EE90", color = "#000000 !important", 
+                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+        `Live Skins Luck` < -0.1 ~ 
+          cell_spec(sprintf("%.1f", `Live Skins Luck`), background = "#FFB6C6", color = "#000000 !important", 
+                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+        TRUE ~ as.character(sprintf("%.1f", `Live Skins Luck`))
+      )
+    ) %>%
+    select(
+      Player = Player_Display,
+      `Total Expected Skins`,
+      `Live Expected Skins`,
+      `Total Actual Skins`,
+      `Skins Luck`,
+      `Live Skins Luck` = `Live Skins Luck Display`,
+      `Perfect Skins %`
+    )
+  
+  # Add TOTAL row
+  total_row <- data.frame(
+    Player = "TOTAL",
+    `Total Expected Skins` = sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE),
+    `Live Expected Skins` = sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE),
+    `Total Actual Skins` = sum(todays_results_with_cumulative$Actual_Skins, na.rm = TRUE),
+    `Skins Luck` = sum(todays_results_with_cumulative$Skins_Luck, na.rm = TRUE),
+    `Live Skins Luck` = sprintf("%.1f", sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE) - 
+                         sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE)),
+    `Perfect Skins %` = NA_real_,
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+  
+  final_player_summary_with_total <- bind_rows(final_player_summary, total_row)
+  
+  knitr::kable(
+    final_player_summary_with_total,
+    digits = 1,
+    align = 'c',
+    escape = FALSE,
+    format = "html"
+  ) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+    column_spec(c(5, 6, 7), bold = TRUE) %>%
+    row_spec(nrow(final_player_summary_with_total), bold = TRUE, background = "#444444")
+}
+```
+
 ---
 
 ## Today's Results & Skins Luck
-
-This section scrapes `plaintextsports.com/nba` for game results. Games that are final or in-progress will appear here.
 
 ```{r matchup_table}
 #| echo: false
@@ -560,7 +816,6 @@ This section scrapes `plaintextsports.com/nba` for game results. Games that are 
 # Create Head-to-Head Matchup Table
 if (nrow(todays_picks) > 0) {
   
-  # Always scrape plaintextsports regardless of blackout window
   # Scrape plaintextsports.com for game results
   url_scores <- "https://plaintextsports.com/nba/"
   page_scores <- read_html(url_scores)
@@ -886,144 +1141,23 @@ if (nrow(todays_picks) > 0) {
 }
 ```
 
-```{r results_and_luck}
+```{r completed_games_table}
 #| echo: false
 #| message: false
 #| warning: false
 
-# Only process results if we have games today
-if (nrow(todays_picks) > 0) {
-  
-  # Always scrape plaintextsports regardless of blackout window
-  # 1. Scrape plaintextsports.com for live game data
-  url_scores <- "https://plaintextsports.com/nba/"
-  page_scores <- read_html(url_scores)
-  
-  # Get all text from the body
-  all_text <- page_scores %>%
-    html_element("body") %>%
-    html_text2()
-  
-  # 2. Extract Game Blocks - Split into lines and get score boxes
-  all_lines <- strsplit(all_text, "\n")[[1]]
-  score_boxes <- all_lines[grepl("^\\+", all_lines)]
-  
-  # 3. Parse a single game box
-  parse_game_box <- function(box) {
-    # Split by "|" character
-    parts <- strsplit(box, "\\|")[[1]]
-    
-    # Extract status, teams, and scores
-    status <- str_trim(parts[2])
-    
-    # Team 1
-    team1_line <- str_trim(parts[4])
-    team1_name <- str_extract(team1_line, "[A-Z]{2,3}")
-    team1_score <- suppressWarnings(as.numeric(str_extract(team1_line, "[0-9]+$")))
-    
-    # Team 2
-    team2_line <- str_trim(parts[6])
-    team2_name <- str_extract(team2_line, "[A-Z]{2,3}")
-    team2_score <- suppressWarnings(as.numeric(str_extract(team2_line, "[0-9]+$")))
-    
-    # Determine if final
-    is_final <- grepl("Final", status, fixed = TRUE)
-    
-    # Determine if game is in progress
-    is_in_progress <- grepl("Q[1-4]|Half|OT|\\d+:\\d+", status) & !is_final
-    
-    # Return data frame
-    data.frame(
-      Team1 = team1_name,
-      Team2 = team2_name,
-      Score1 = team1_score,
-      Score2 = team2_score,
-      Status = status,
-      Finished = is_final,
-      InProgress = is_in_progress,
-      stringsAsFactors = FALSE
-    )
-  }
-  
-  # 4. Parse all game boxes
-  if (length(score_boxes) > 0) {
-    all_game_results <- bind_rows(lapply(score_boxes, parse_game_box))
-  } else {
-    all_game_results <- data.frame()
-  }
-  
-  # 5. Standardize team abbreviations to match draft_data
-  team_replacements <- c(
-    "^GS$" = "GSW",
-    "^NO$" = "NOP",
-    "^NY$" = "NYK",
-    "^SA$" = "SAS",
-    "^WSH$" = "WAS"
-  )
-  
-  # Apply standardization
-  if (nrow(all_game_results) > 0) {
-    all_game_results <- all_game_results %>%
-      mutate(
-        Team1 = str_replace_all(Team1, team_replacements),
-        Team2 = str_replace_all(Team2, team_replacements)
-      )
-  }
-  
-  # 6. Create Won_Game lookup - only for finished games
-  final_team_results <- data.frame(Abbr = character(), Won_Game = logical(), stringsAsFactors = FALSE)
-  
-  if (nrow(all_game_results) > 0) {
-    finished_games <- all_game_results %>% filter(Finished == TRUE)
-    
-    if (nrow(finished_games) > 0) {
-      # Team 1 results
-      team1_results <- finished_games %>%
-        select(Abbr = Team1, PTS = Score1, Opp_PTS = Score2) %>%
-        mutate(Won_Game = PTS > Opp_PTS)
-      
-      # Team 2 results
-      team2_results <- finished_games %>%
-        select(Abbr = Team2, PTS = Score2, Opp_PTS = Score1) %>%
-        mutate(Won_Game = PTS > Opp_PTS)
-      
-      final_team_results <- bind_rows(team1_results, team2_results) %>%
-        select(Abbr, Won_Game)
-    }
-  }
-  
-  # 6. Create todays_results with actual outcomes
-  todays_results <- todays_picks %>%
-    left_join(final_team_results, by = "Abbr", suffix = c("", "_new")) %>%
-    mutate(
-      Won_Game = coalesce(Won_Game_new, Won_Game),
-      Actual_Skins = case_when(
-        Won_Game == TRUE & Pick == "W" ~ 1,
-        Won_Game == FALSE & Pick == "L" ~ 1,
-        is.na(Won_Game) ~ NA_real_,
-        TRUE ~ 0
-      ),
-      Skins_Luck = Actual_Skins - `Expected Skins`
-    ) %>%
-    select(-Won_Game_new)
-  
-  # 7. Save today's results to file (use underscores for easier CSV handling)
-  # This now correctly uses today_ct (which is skins_date) as the filename
-  today_file <- file.path(history_dir, paste0(today_ct, ".csv"))
-  
-  todays_results %>%
-    select(
-      Date, Player, Team, Abbr, Pick, 
-      Expected_Skins = `Expected Skins`, 
-      Won_Game, Actual_Skins, Skins_Luck,
-      game_id
-    ) %>%
-    write_csv(today_file)
-  
-  # 8. Print Table 4: Completed Games Summary
+# Print Table 4: Completed Games Summary
+if (exists("todays_results") && nrow(todays_results) > 0) {
   completed_games_table <- todays_results %>%
     filter(!is.na(Won_Game)) %>%
     mutate(
+      # Calculate Won_Skin first
+      Won_Skin = case_when(
+        Won_Game == TRUE & Pick == "W" ~ TRUE,
+        Won_Game == FALSE & Pick == "L" ~ TRUE,
+        is.na(Won_Game) ~ NA,
+        TRUE ~ FALSE
+      ),
       # Apply color-coding to Player column
       Player_Display = case_when(
         Won_Skin == TRUE ~ 
@@ -1071,135 +1205,6 @@ if (nrow(todays_picks) > 0) {
   } else {
     cat("No games have been completed yet today.")
   }
-  
-} else {
-  cat("No games scheduled for today.")
-}
-```
-
-```{r final_player_summary}
-#| echo: false
-#| message: false
-#| warning: false
-
-# Print Table 5: Final Player Summary
-if (exists("todays_results") && nrow(todays_results) > 0) {
-  
-  # Calculate cumulative live expected skins
-  todays_results_with_cumulative <- todays_results %>%
-    mutate(
-      Cumulative_Live_Expected = if_else(!is.na(Won_Game), Actual_Skins, Live_Expected_Skins)
-    )
-  
-  # Identify self zero-sum matchups (same player, both teams in same game)
-  self_zero_sum_players <- todays_results_with_cumulative %>%
-    group_by(game_id, Player) %>%
-    filter(n() >= 2) %>%
-    pull(Player) %>%
-    unique()
-  
-  # Calculate Perfect Skins % for each player
-  perfect_skins_calc <- todays_results_with_cumulative %>%
-    group_by(Player) %>%
-    summarise(
-      num_games = n(),
-      perfect_prob = prod(Cumulative_Live_Expected, na.rm = TRUE),
-      .groups = 'drop'
-    ) %>%
-    mutate(
-      `Perfect Skins %` = case_when(
-        # If player has self zero-sum matchup, 0%
-        Player %in% self_zero_sum_players ~ 0,
-        # If player has less than 5 games, 0%
-        num_games < 5 ~ 0,
-        # Otherwise, multiply live expected skins probabilities and convert to %
-        TRUE ~ perfect_prob * 100
-      )
-    ) %>%
-    select(Player, `Perfect Skins %`)
-  
-  final_player_summary <- todays_results_with_cumulative %>%
-    group_by(Player) %>%
-    summarise(
-      `Total Expected Skins` = sum(`Expected Skins`, na.rm = TRUE),
-      `Live Expected Skins` = sum(Cumulative_Live_Expected, na.rm = TRUE),
-      `Total Actual Skins` = sum(Actual_Skins, na.rm = TRUE),
-      `Skins Luck` = sum(Skins_Luck, na.rm = TRUE),
-      .groups = 'drop'
-    ) %>%
-    mutate(
-      `Live Skins Luck` = `Live Expected Skins` - `Total Expected Skins`
-    ) %>%
-    left_join(perfect_skins_calc, by = "Player") %>%
-    select(
-      Player, 
-      `Total Expected Skins`, 
-      `Live Expected Skins`,
-      `Total Actual Skins`, 
-      `Skins Luck`, 
-      `Live Skins Luck`,
-      `Perfect Skins %`
-    ) %>%
-    arrange(desc(`Skins Luck`)) %>%
-    mutate(
-      # Apply color coding to Player column
-      Player_Display = case_when(
-        `Skins Luck` > 0 ~ 
-          cell_spec(Player, background = "#90EE90", color = "#000000 !important", 
-                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        `Skins Luck` < 0 ~ 
-          cell_spec(Player, background = "#FFB6C6", color = "#000000 !important", 
-                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        TRUE ~ Player
-      ),
-      # Apply color coding to Live Skins Luck column - exclude values between -0.1 and 0.1
-      `Live Skins Luck Display` = case_when(
-        `Live Skins Luck` > 0.1 ~ 
-          cell_spec(sprintf("%.1f", `Live Skins Luck`), background = "#90EE90", color = "#000000 !important", 
-                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        `Live Skins Luck` < -0.1 ~ 
-          cell_spec(sprintf("%.1f", `Live Skins Luck`), background = "#FFB6C6", color = "#000000 !important", 
-                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        TRUE ~ as.character(sprintf("%.1f", `Live Skins Luck`))
-      )
-    ) %>%
-    select(
-      Player = Player_Display,
-      `Total Expected Skins`,
-      `Live Expected Skins`,
-      `Total Actual Skins`,
-      `Skins Luck`,
-      `Live Skins Luck` = `Live Skins Luck Display`,
-      `Perfect Skins %`
-    )
-  
-  # Add TOTAL row
-  total_row <- data.frame(
-    Player = "TOTAL",
-    `Total Expected Skins` = sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE),
-    `Live Expected Skins` = sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE),
-    `Total Actual Skins` = sum(todays_results_with_cumulative$Actual_Skins, na.rm = TRUE),
-    `Skins Luck` = sum(todays_results_with_cumulative$Skins_Luck, na.rm = TRUE),
-    `Live Skins Luck` = sprintf("%.1f", sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE) - 
-                         sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE)),
-    `Perfect Skins %` = NA_real_,
-    check.names = FALSE,
-    stringsAsFactors = FALSE
-  )
-  
-  final_player_summary_with_total <- bind_rows(final_player_summary, total_row)
-  
-  knitr::kable(
-    final_player_summary_with_total,
-    digits = 1,
-    align = 'c',
-    caption = "Final Player Summary (Expected vs. Actual)",
-    escape = FALSE,
-    format = "html"
-  ) %>%
-    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(c(5, 6, 7), bold = TRUE) %>%
-    row_spec(nrow(final_player_summary_with_total), bold = TRUE, background = "#444444")
 }
 ```
 
@@ -1653,8 +1658,8 @@ if (nrow(ytd_data) > 0) {
         )
       )
     ) %>%
-    select(-`Cumulative Skins Luck`) %>%
-    rename(`Cumulative Skins Luck` = `Cumulative Skins Luck Display`)
+    select(Player, `Cumulative Skins Luck` = `Cumulative Skins Luck Display`, Games, 
+           `Total Expected Skins`, `Total Actual Skins`, `Expected Skins %`, `Avg Skins Luck per Game`)
   
   knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats"), escape = FALSE, format = "html") %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
@@ -1740,8 +1745,8 @@ if (nrow(ytd_data) > 0) {
         )
       )
     ) %>%
-    select(-`Cumulative Skins Luck`) %>%
-    rename(`Cumulative Skins Luck` = `Cumulative Skins Luck Display`)
+    select(Player, `Cumulative Skins Luck` = `Cumulative Skins Luck Display`, Games, 
+           `Total Expected Skins`, `Total Actual Skins`, `Expected Skins %`, `Avg Skins Luck per Game`)
     
   knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats (Baseline)"), escape = FALSE, format = "html") %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
