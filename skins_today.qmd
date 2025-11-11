@@ -383,71 +383,147 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
       live_win_prob = convert_prob_to_num(live_win_prob)
     ) %>%
     mutate(
+      # ENHANCED: More robust team name matching with multiple patterns
       Team = case_when(
-        str_detect(Team, regex("\\bBlazers\\b", ignore_case = TRUE)) ~ "Portland Trail Blazers",
+        # Portland Trail Blazers
+        str_detect(Team, regex("\\bBlazers?\\b", ignore_case = TRUE)) ~ "Portland Trail Blazers",
         str_detect(Team, regex("\\bPortland\\b", ignore_case = TRUE)) ~ "Portland Trail Blazers",
-        str_detect(Team, regex("\\b76ers\\b", ignore_case = TRUE)) ~ "Philadelphia 76ers",
+        str_detect(Team, regex("\\bTrail\\s*Blazers?\\b", ignore_case = TRUE)) ~ "Portland Trail Blazers",
+        
+        # Philadelphia 76ers
+        str_detect(Team, regex("\\b76ers?\\b", ignore_case = TRUE)) ~ "Philadelphia 76ers",
         str_detect(Team, regex("\\bPhiladelphia\\b", ignore_case = TRUE)) ~ "Philadelphia 76ers",
-        str_detect(Team, regex("\\bPistons\\b", ignore_case = TRUE)) ~ "Detroit Pistons",
+        str_detect(Team, regex("\\bPhilly\\b", ignore_case = TRUE)) ~ "Philadelphia 76ers",
+        str_detect(Team, regex("\\bSixers?\\b", ignore_case = TRUE)) ~ "Philadelphia 76ers",
+        
+        # Detroit Pistons
+        str_detect(Team, regex("\\bPistons?\\b", ignore_case = TRUE)) ~ "Detroit Pistons",
         str_detect(Team, regex("\\bDetroit\\b", ignore_case = TRUE)) ~ "Detroit Pistons",
+        
+        # Miami Heat
         str_detect(Team, regex("\\bHeat\\b", ignore_case = TRUE)) ~ "Miami Heat",
         str_detect(Team, regex("\\bMiami\\b", ignore_case = TRUE)) ~ "Miami Heat",
-        str_detect(Team, regex("\\bCeltics\\b", ignore_case = TRUE)) ~ "Boston Celtics",
+        
+        # Boston Celtics
+        str_detect(Team, regex("\\bCeltics?\\b", ignore_case = TRUE)) ~ "Boston Celtics",
         str_detect(Team, regex("\\bBoston\\b", ignore_case = TRUE)) ~ "Boston Celtics",
-        str_detect(Team, regex("\\bNets\\b", ignore_case = TRUE)) & !str_detect(Team, regex("\\bHornets\\b", ignore_case = TRUE)) ~ "Brooklyn Nets",
+        
+        # Brooklyn Nets (MUST come before checking for just "Nets")
         str_detect(Team, regex("\\bBrooklyn\\b", ignore_case = TRUE)) ~ "Brooklyn Nets",
-        str_detect(Team, regex("\\bKnicks\\b", ignore_case = TRUE)) ~ "New York Knicks",
-        str_detect(Team, regex("\\bNew York\\b", ignore_case = TRUE)) & !str_detect(Team, regex("\\bPelicans\\b", ignore_case = TRUE)) ~ "New York Knicks",
-        str_detect(Team, regex("\\bRaptors\\b", ignore_case = TRUE)) ~ "Toronto Raptors",
+        str_detect(Team, regex("\\bBrooklyn\\s+Nets?\\b", ignore_case = TRUE)) ~ "Brooklyn Nets",
+        str_detect(Team, regex("\\bNets?\\b", ignore_case = TRUE)) & !str_detect(Team, regex("\\bHornets?\\b", ignore_case = TRUE)) ~ "Brooklyn Nets",
+        
+        # New York Knicks
+        str_detect(Team, regex("\\bKnicks?\\b", ignore_case = TRUE)) ~ "New York Knicks",
+        str_detect(Team, regex("\\bNew\\s+York\\b", ignore_case = TRUE)) & !str_detect(Team, regex("\\bPelicans?\\b", ignore_case = TRUE)) ~ "New York Knicks",
+        str_detect(Team, regex("\\bNY\\b(?!\\s*Pelicans?)", ignore_case = TRUE)) ~ "New York Knicks",
+        
+        # Toronto Raptors
+        str_detect(Team, regex("\\bRaptors?\\b", ignore_case = TRUE)) ~ "Toronto Raptors",
         str_detect(Team, regex("\\bToronto\\b", ignore_case = TRUE)) ~ "Toronto Raptors",
-        str_detect(Team, regex("\\bBulls\\b", ignore_case = TRUE)) ~ "Chicago Bulls",
+        
+        # Chicago Bulls
+        str_detect(Team, regex("\\bBulls?\\b", ignore_case = TRUE)) ~ "Chicago Bulls",
         str_detect(Team, regex("\\bChicago\\b", ignore_case = TRUE)) ~ "Chicago Bulls",
-        str_detect(Team, regex("\\bCavaliers\\b", ignore_case = TRUE)) ~ "Cleveland Cavaliers",
+        
+        # Cleveland Cavaliers
+        str_detect(Team, regex("\\bCavaliers?\\b", ignore_case = TRUE)) ~ "Cleveland Cavaliers",
         str_detect(Team, regex("\\bCleveland\\b", ignore_case = TRUE)) ~ "Cleveland Cavaliers",
-        str_detect(Team, regex("\\bPacers\\b", ignore_case = TRUE)) ~ "Indiana Pacers",
+        str_detect(Team, regex("\\bCavs?\\b", ignore_case = TRUE)) ~ "Cleveland Cavaliers",
+        
+        # Indiana Pacers
+        str_detect(Team, regex("\\bPacers?\\b", ignore_case = TRUE)) ~ "Indiana Pacers",
         str_detect(Team, regex("\\bIndiana\\b", ignore_case = TRUE)) ~ "Indiana Pacers",
-        str_detect(Team, regex("\\bBucks\\b", ignore_case = TRUE)) ~ "Milwaukee Bucks",
+        
+        # Milwaukee Bucks
+        str_detect(Team, regex("\\bBucks?\\b", ignore_case = TRUE)) ~ "Milwaukee Bucks",
         str_detect(Team, regex("\\bMilwaukee\\b", ignore_case = TRUE)) ~ "Milwaukee Bucks",
-        str_detect(Team, regex("\\bHawks\\b", ignore_case = TRUE)) ~ "Atlanta Hawks",
+        
+        # Atlanta Hawks
+        str_detect(Team, regex("\\bHawks?\\b", ignore_case = TRUE)) ~ "Atlanta Hawks",
         str_detect(Team, regex("\\bAtlanta\\b", ignore_case = TRUE)) ~ "Atlanta Hawks",
-        str_detect(Team, regex("\\bHornets\\b", ignore_case = TRUE)) ~ "Charlotte Hornets",
+        
+        # Charlotte Hornets
+        str_detect(Team, regex("\\bHornets?\\b", ignore_case = TRUE)) ~ "Charlotte Hornets",
         str_detect(Team, regex("\\bCharlotte\\b", ignore_case = TRUE)) ~ "Charlotte Hornets",
+        
+        # Orlando Magic
         str_detect(Team, regex("\\bMagic\\b", ignore_case = TRUE)) ~ "Orlando Magic",
         str_detect(Team, regex("\\bOrlando\\b", ignore_case = TRUE)) ~ "Orlando Magic",
-        str_detect(Team, regex("\\bWizards\\b", ignore_case = TRUE)) ~ "Washington Wizards",
+        
+        # Washington Wizards
+        str_detect(Team, regex("\\bWizards?\\b", ignore_case = TRUE)) ~ "Washington Wizards",
         str_detect(Team, regex("\\bWashington\\b", ignore_case = TRUE)) ~ "Washington Wizards",
-        str_detect(Team, regex("\\bNuggets\\b", ignore_case = TRUE)) ~ "Denver Nuggets",
+        
+        # Denver Nuggets
+        str_detect(Team, regex("\\bNuggets?\\b", ignore_case = TRUE)) ~ "Denver Nuggets",
         str_detect(Team, regex("\\bDenver\\b", ignore_case = TRUE)) ~ "Denver Nuggets",
-        str_detect(Team, regex("\\bTimberwolves\\b", ignore_case = TRUE)) ~ "Minnesota Timberwolves",
+        
+        # Minnesota Timberwolves
+        str_detect(Team, regex("\\bTimberwolves?\\b", ignore_case = TRUE)) ~ "Minnesota Timberwolves",
         str_detect(Team, regex("\\bMinnesota\\b", ignore_case = TRUE)) ~ "Minnesota Timberwolves",
+        str_detect(Team, regex("\\bT-?Wolves?\\b", ignore_case = TRUE)) ~ "Minnesota Timberwolves",
+        
+        # Oklahoma City Thunder
         str_detect(Team, regex("\\bThunder\\b", ignore_case = TRUE)) ~ "Oklahoma City Thunder",
-        str_detect(Team, regex("\\bOklahoma\\b", ignore_case = TRUE)) ~ "Oklahoma City Thunder",
+        str_detect(Team, regex("\\bOklahoma\\s*City\\b", ignore_case = TRUE)) ~ "Oklahoma City Thunder",
+        str_detect(Team, regex("\\bOKC\\b", ignore_case = TRUE)) ~ "Oklahoma City Thunder",
+        
+        # Utah Jazz
         str_detect(Team, regex("\\bJazz\\b", ignore_case = TRUE)) ~ "Utah Jazz",
         str_detect(Team, regex("\\bUtah\\b", ignore_case = TRUE)) ~ "Utah Jazz",
-        str_detect(Team, regex("\\bWarriors\\b", ignore_case = TRUE)) ~ "Golden State Warriors",
-        str_detect(Team, regex("\\bGolden State\\b", ignore_case = TRUE)) ~ "Golden State Warriors",
-        str_detect(Team, regex("\\bClippers\\b", ignore_case = TRUE)) ~ "Los Angeles Clippers",
-        str_detect(Team, regex("\\bLA Clippers\\b", ignore_case = TRUE)) ~ "Los Angeles Clippers",
-        str_detect(Team, regex("\\bLakers\\b", ignore_case = TRUE)) ~ "Los Angeles Lakers",
-        str_detect(Team, regex("\\bLA Lakers\\b", ignore_case = TRUE)) ~ "Los Angeles Lakers",
-        str_detect(Team, regex("\\bSuns\\b", ignore_case = TRUE)) ~ "Phoenix Suns",
+        
+        # Golden State Warriors
+        str_detect(Team, regex("\\bWarriors?\\b", ignore_case = TRUE)) ~ "Golden State Warriors",
+        str_detect(Team, regex("\\bGolden\\s*State\\b", ignore_case = TRUE)) ~ "Golden State Warriors",
+        str_detect(Team, regex("\\bGS\\b(?!W)", ignore_case = TRUE)) ~ "Golden State Warriors",
+        
+        # Los Angeles Clippers
+        str_detect(Team, regex("\\bClippers?\\b", ignore_case = TRUE)) ~ "Los Angeles Clippers",
+        str_detect(Team, regex("\\bLA\\s*Clippers?\\b", ignore_case = TRUE)) ~ "Los Angeles Clippers",
+        str_detect(Team, regex("\\bL\\.?A\\.?\\s*Clippers?\\b", ignore_case = TRUE)) ~ "Los Angeles Clippers",
+        
+        # Los Angeles Lakers
+        str_detect(Team, regex("\\bLakers?\\b", ignore_case = TRUE)) ~ "Los Angeles Lakers",
+        str_detect(Team, regex("\\bLA\\s*Lakers?\\b", ignore_case = TRUE)) ~ "Los Angeles Lakers",
+        str_detect(Team, regex("\\bL\\.?A\\.?\\s*Lakers?\\b", ignore_case = TRUE)) ~ "Los Angeles Lakers",
+        
+        # Phoenix Suns
+        str_detect(Team, regex("\\bSuns?\\b", ignore_case = TRUE)) ~ "Phoenix Suns",
         str_detect(Team, regex("\\bPhoenix\\b", ignore_case = TRUE)) ~ "Phoenix Suns",
-        str_detect(Team, regex("\\bKings\\b", ignore_case = TRUE)) ~ "Sacramento Kings",
+        
+        # Sacramento Kings
+        str_detect(Team, regex("\\bKings?\\b", ignore_case = TRUE)) ~ "Sacramento Kings",
         str_detect(Team, regex("\\bSacramento\\b", ignore_case = TRUE)) ~ "Sacramento Kings",
-        str_detect(Team, regex("\\bMavericks\\b", ignore_case = TRUE)) ~ "Dallas Mavericks",
+        
+        # Dallas Mavericks
+        str_detect(Team, regex("\\bMavericks?\\b", ignore_case = TRUE)) ~ "Dallas Mavericks",
         str_detect(Team, regex("\\bDallas\\b", ignore_case = TRUE)) ~ "Dallas Mavericks",
-        str_detect(Team, regex("\\bRockets\\b", ignore_case = TRUE)) ~ "Houston Rockets",
+        str_detect(Team, regex("\\bMavs?\\b", ignore_case = TRUE)) ~ "Dallas Mavericks",
+        
+        # Houston Rockets
+        str_detect(Team, regex("\\bRockets?\\b", ignore_case = TRUE)) ~ "Houston Rockets",
         str_detect(Team, regex("\\bHouston\\b", ignore_case = TRUE)) ~ "Houston Rockets",
-        str_detect(Team, regex("\\bGrizzlies\\b", ignore_case = TRUE)) ~ "Memphis Grizzlies",
+        
+        # Memphis Grizzlies
+        str_detect(Team, regex("\\bGrizzlies?\\b", ignore_case = TRUE)) ~ "Memphis Grizzlies",
         str_detect(Team, regex("\\bMemphis\\b", ignore_case = TRUE)) ~ "Memphis Grizzlies",
-        str_detect(Team, regex("\\bPelicans\\b", ignore_case = TRUE)) ~ "New Orleans Pelicans",
-        str_detect(Team, regex("\\bNew Orleans\\b", ignore_case = TRUE)) ~ "New Orleans Pelicans",
-        str_detect(Team, regex("\\bSpurs\\b", ignore_case = TRUE)) ~ "San Antonio Spurs",
-        str_detect(Team, regex("\\bSan Antonio\\b", ignore_case = TRUE)) ~ "San Antonio Spurs",
+        
+        # New Orleans Pelicans
+        str_detect(Team, regex("\\bPelicans?\\b", ignore_case = TRUE)) ~ "New Orleans Pelicans",
+        str_detect(Team, regex("\\bNew\\s*Orleans\\b", ignore_case = TRUE)) ~ "New Orleans Pelicans",
+        str_detect(Team, regex("\\bNO\\b(?!\\s*Lakers?)", ignore_case = TRUE)) ~ "New Orleans Pelicans",
+        
+        # San Antonio Spurs
+        str_detect(Team, regex("\\bSpurs?\\b", ignore_case = TRUE)) ~ "San Antonio Spurs",
+        str_detect(Team, regex("\\bSan\\s*Antonio\\b", ignore_case = TRUE)) ~ "San Antonio Spurs",
+        
         TRUE ~ Team
       )
     ) %>%
-    distinct(Team, .keep_all = TRUE)
+    # Remove duplicates after standardization
+    group_by(Team) %>%
+    summarise(live_win_prob = first(na.omit(live_win_prob)), .groups = 'drop')
 
   # Join with todays_picks and calculate Live Expected Skins
   todays_picks <- todays_picks %>%
@@ -612,8 +688,12 @@ if (nrow(todays_picks) > 0) {
   # Build the matchup table - ONE ROW PER GAME
   matchup_prep <- todays_picks %>%
     mutate(
-      # Calculate cumulative Live Expected Skins (completed games use Actual_Skins)
-      Cumulative_Live_Expected = if_else(!is.na(Won_Game), Actual_Skins, Live_Expected_Skins)
+      # IMPROVED: Use first non-NA value for cumulative calculation
+      Cumulative_Live_Expected = case_when(
+        !is.na(Won_Game) ~ Actual_Skins,
+        !is.na(Live_Expected_Skins) ~ Live_Expected_Skins,
+        TRUE ~ `Expected Skins`  # Fallback to Expected if Live is also NA
+      )
     ) %>%
     arrange(game_id)
   
@@ -625,12 +705,14 @@ if (nrow(todays_picks) > 0) {
       Team_1 = first(Team),
       Pick_1 = first(Pick),
       Won_Skin_1 = first(Won_Skin),
-      Live_Skin_Prob_1 = first(Cumulative_Live_Expected), 
+      # IMPROVED: Get first non-NA live expected skins
+      Live_Skin_Prob_1 = coalesce(first(Cumulative_Live_Expected), first(`Expected Skins`)),
       Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
       Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
       Pick_2 = if(n() > 1) nth(Pick, 2) else NA_character_,
       Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA,
-      Live_Skin_Prob_2 = if(n() > 1) nth(Cumulative_Live_Expected, 2) else NA,
+      # IMPROVED: Get second non-NA live expected skins
+      Live_Skin_Prob_2 = if(n() > 1) coalesce(nth(Cumulative_Live_Expected, 2), nth(`Expected Skins`, 2)) else NA,
       Status = first(Game_Status),
       .groups = 'drop'
     ) %>%
@@ -679,7 +761,7 @@ if (nrow(todays_picks) > 0) {
         Won_Skin_2 ~ "✓ Yes",
         TRUE ~ "✗ No"
       ),
-      # Format Live Probabilities
+      # Format Live Probabilities - now should always have values
       Live_Prob_1_Display = if_else(is.na(Live_Skin_Prob_1), "", paste0(sprintf("%.0f", Live_Skin_Prob_1 * 100), "%")),
       Live_Prob_2_Display = if_else(is.na(Live_Skin_Prob_2), "", paste0(sprintf("%.0f", Live_Skin_Prob_2 * 100), "%")),
       # Create vs. display
@@ -1650,4 +1732,91 @@ p2 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Expected, color = Player, 
   scale_color_brewer(palette = "Set2")
 
 print(p2)
+```
+
+---
+
+## Diagnostic Information
+
+```{r diagnostics}
+#| echo: false
+#| results: 'asis'
+
+cat("\n\n### Live Data Matching Diagnostics\n\n")
+
+# Diagnostic 1: Teams in todays_picks without Live_Expected_Skins
+if (exists("todays_picks") && nrow(todays_picks) > 0) {
+  teams_missing_live <- todays_picks %>%
+    filter(is.na(Live_Expected_Skins)) %>%
+    select(Team, Abbr, Player, Pick, `Expected Skins`)
+  
+  if (nrow(teams_missing_live) > 0) {
+    cat("**Issue #1: Teams Missing Live Expected Skins**\n\n")
+    cat("These teams from today's picks did NOT get matched with live data from Gambletron:\n\n")
+    print(kable(teams_missing_live, format = "html") %>%
+      kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE))
+    cat("\n\n")
+  } else {
+    cat("✓ **Issue #1 Status: RESOLVED** - All teams have live expected skins values\n\n")
+  }
+}
+
+# Diagnostic 2: Teams from Gambletron that weren't standardized
+if (exists("nba_today") && exists("live_data_final")) {
+  original_teams <- unique(c(nba_today$team_1, nba_today$team_2))
+  standardized_teams <- unique(live_data_final$Team)
+  
+  # Check if any original teams don't appear in standardized list
+  # (this would indicate a standardization failure)
+  cat("**Issue #2: Gambletron Team Names**\n\n")
+  cat(paste0("- Original team names from Gambletron: ", length(original_teams), "\n"))
+  cat(paste0("- Successfully standardized: ", length(standardized_teams), "\n\n"))
+  
+  if (length(original_teams) > length(standardized_teams)) {
+    cat("⚠ **Warning:** Some Gambletron team names may have been duplicates or failed to standardize\n\n")
+  } else {
+    cat("✓ All Gambletron team names were processed\n\n")
+  }
+}
+
+# Diagnostic 3: Summary of Live_Expected_Skins in matchup table
+if (exists("matchup_prep")) {
+  live_summary <- matchup_prep %>%
+    summarise(
+      Total_Games = n(),
+      Games_With_Live_Data = sum(!is.na(Live_Expected_Skins)),
+      Games_Missing_Live_Data = sum(is.na(Live_Expected_Skins)),
+      Pct_With_Live_Data = mean(!is.na(Live_Expected_Skins)) * 100
+    )
+  
+  cat("**Issue #3: Live Data Coverage in Matchup Table**\n\n")
+  cat(paste0("- Total games today: ", live_summary$Total_Games, "\n"))
+  cat(paste0("- Games with live data: ", live_summary$Games_With_Live_Data, "\n"))
+  cat(paste0("- Games missing live data: ", live_summary$Games_Missing_Live_Data, "\n"))
+  cat(paste0("- Coverage percentage: ", sprintf("%.1f", live_summary$Pct_With_Live_Data), "%\n\n"))
+  
+  if (live_summary$Pct_With_Live_Data == 100) {
+    cat("✓ **Issue #3 Status: RESOLVED** - All games have live data\n\n")
+  } else {
+    cat("⚠ **Issue #3 Status: PARTIAL** - Some games still missing live data\n\n")
+  }
+}
+
+# Diagnostic 4: Check for distinct() issues
+if (exists("live_data_final")) {
+  cat("**Issue #4: Duplicate Removal Check**\n\n")
+  cat(paste0("- Unique teams in live_data_final: ", nrow(live_data_final), "\n"))
+  cat(paste0("- Expected NBA teams: 30\n\n"))
+  
+  if (nrow(live_data_final) > 30) {
+    cat("⚠ **Warning:** More than 30 teams found - possible duplicates remaining\n\n")
+  } else if (nrow(live_data_final) < 30) {
+    cat("⚠ **Warning:** Fewer than 30 teams found - some games may not be scraped yet\n\n")
+  } else {
+    cat("✓ Correct number of teams found\n\n")
+  }
+}
+
+cat("\n---\n\n")
+cat("*Note: Missing live data for games that haven't started yet is expected behavior.*\n")
 ```
