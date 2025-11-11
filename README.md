@@ -36,7 +36,7 @@
 - **When:** Opening fresh conversation
 - **Key Features:**
   - Project overview in ~100 lines
-  - Recent changes (Oct 31, 2025)
+  - Recent changes (Nov 10, 2025)
   - Critical fixes summary
   - How to continue work
 - **Pro Tip:** Copy entire file, paste into new chat with "Continue working on this project"
@@ -106,7 +106,7 @@
 ### 🎨 Feature Documentation
 
 #### 8. **NEW_FEATURES_GUIDE.md**
-- **What:** Guide to three major features
+- **What:** Guide to major features
 - **Contents:**
   - Historical data integration
   - Chart explanations (cumulative luck, expected skins)
@@ -135,7 +135,7 @@
 #### 11. **COMPLETE_FEATURES.md**
 - **What:** Final feature summary
 - **Contents:**
-  - All three major features
+  - All major features
   - Expected results
   - Testing checklist
 - **When to Read:** Final verification before deployment
@@ -200,6 +200,61 @@
 
 ---
 
+## 🆕 **WHAT'S NEW - November 2025 Updates**
+
+### Major Feature: Live Probabilities Integration
+
+**NEW: Real-Time Skin Probability Tracking** 🔴 LIVE
+- System now scrapes live win probabilities from gambletron2000.com
+- Updates skin probabilities in real-time during games
+- Shows "Live Skin Prob" column in matchup tables
+- Distinguishes between:
+  - **Pre-game odds** - Expected skins based on opening lines
+  - **Live odds** - Current probability based on game state
+  - **Final results** - Actual skins won (0 or 1)
+
+**NEW: Perfect Skins % Metric**
+- Calculates probability of winning ALL skins for the day
+- Multiplies live probabilities across all games
+- Automatically adjusts for zero-sum matchups
+- Shows 0% if player has same team matchup (impossible to win both)
+- Requires minimum 5 games to display
+
+**NEW: Live Skins Luck**
+- Real-time comparison: Live Expected vs Pre-game Expected
+- Positive value = games going better than expected
+- Negative value = games going worse than expected
+- Updates continuously during game day
+
+**NEW: Cumulative Live Expected**
+- Completed games use actual results (0 or 1)
+- In-progress games use live win probabilities
+- Not-started games use pre-game expected skins
+- Provides most accurate current expectation
+
+### Schedule Optimization
+
+**UPDATED: GitHub Actions Workflow** ⚙️
+- **Previous:** Complex schedule with different frequencies
+- **Current:** Runs **every 20 minutes** around the clock
+- **Benefit:** More frequent updates during all game times
+- **Cron:** `'*/20 * * * *'` (every 20 minutes, 24/7)
+- **Why:** Captures live probability changes more effectively
+
+### Data Pipeline Enhancements
+
+**IMPROVED: Multi-Source Data Integration**
+1. **Sportsline.com** - Pre-game odds and expected skins
+2. **Plaintextsports.com** - Final scores and game results
+3. **Gambletron2000.com** - Live win probabilities (NEW)
+
+**IMPROVED: Blackout Window Handling**
+- Still uses CSV fallback during 11 PM - 2 AM window
+- Now scrapes live probabilities even during blackout
+- Ensures users always see most current information
+
+---
+
 ## 🔧 Comprehensive Troubleshooting Guide
 
 ### 🚨 Critical Issues & Solutions
@@ -219,7 +274,7 @@
 ```r
 # Check baseline date
 baseline_date_file <- "skins_history/baseline_date.txt"
-readLines(baseline_date_file)  # Should match ytd_baseline update date
+readLines(baseline_date_file)  # Should be 2025-11-05
 
 # Check for duplicates
 library(dplyr)
@@ -231,14 +286,58 @@ all_history %>% group_by(Date, Player, Team) %>% filter(n() > 1)  # Should be em
 all_history %>% filter(is.na(Won_Game)) %>% count()  # Should only be games not yet played
 ```
 
+**Current Baseline:**
+- **Date:** November 5, 2025
+- **Includes:** All data from October 24 - November 4
+- **Formula:** YTD Totals = Baseline + (Nov 5+ daily data)
+
 **Prevention:**
-- Always verify baseline_date.txt matches ytd_baseline.csv update
-- Never manually edit historical CSV files
-- Let GitHub Actions handle data updates
+- Never manually edit baseline_date.txt
+- Let system automatically update from Nov 5 onward
+- Verify baseline values match documented Nov 4 totals
 
 ---
 
-#### Issue 2: Yesterday's Data Shows Wrong Teams
+#### Issue 2: Live Probabilities Not Updating
+**Symptoms:**
+- "Live Skin Prob" column shows empty values
+- Probabilities stuck at pre-game odds
+- No updates during games
+
+**Root Cause:**
+- Gambletron scraping failure
+- Team name mapping incorrect
+- NBA games not found on site
+
+**Solution:**
+```r
+# Check if scraping succeeded
+url_live <- "https://www.gambletron2000.com/live?sport=nba&team="
+response <- GET(url_live, user_agent("Mozilla/5.0"))
+webpage <- read_html(response)
+live_nodes <- webpage %>% html_elements("li.event-summary")
+length(live_nodes)  # Should be > 0 if games are live
+
+# Verify team name mappings
+# Check that abbreviated names convert correctly to full names
+```
+
+**Verification:**
+```r
+# Live data should populate for in-progress games
+todays_picks %>%
+  filter(!is.na(Live_Expected_Skins)) %>%
+  select(Team, Pick, `Expected Skins`, Live_Expected_Skins)
+```
+
+**Prevention:**
+- Monitor GitHub Actions logs for scraping errors
+- Keep team name mapping updated as site changes
+- Test scraping during actual game times
+
+---
+
+#### Issue 3: Yesterday's Data Shows Wrong Teams
 **Symptoms:**
 - Yesterday's Results section shows teams that didn't play yesterday
 - Matchups are incorrect
@@ -276,7 +375,7 @@ print(paste("Yesterday's date:", yesterday_ct))
 
 ---
 
-#### Issue 3: Blackout Window Not Working (11 PM - 2 AM)
+#### Issue 4: Blackout Window Not Working (11 PM - 2 AM)
 **Symptoms:**
 - System tries to scrape during blackout window
 - CSV file not found errors
@@ -309,14 +408,16 @@ cat("Looking for:", file_path, "\n")
 cat("File exists?", file.exists(file_path), "\n")
 ```
 
+**Note:** With 20-minute schedule, last run before blackout is ~10:40 PM CT
+
 **Prevention:**
-- GitHub Actions should run BEFORE 11 PM CT
-- Ensure last daytime run (5 PM CT / 22:00 UTC) completes successfully
-- Monitor GitHub Actions logs during evening runs
+- Ensure afternoon runs complete successfully
+- Monitor GitHub Actions logs during evening
+- Verify CSV saved before 11 PM cutoff
 
 ---
 
-#### Issue 4: Color Coding Not Appearing in Tables
+#### Issue 5: Color Coding Not Appearing in Tables
 **Symptoms:**
 - Player names don't show green/pink backgrounds
 - Formatting appears as plain text
@@ -355,7 +456,7 @@ knitr::kable(
 
 ---
 
-#### Issue 5: Team Abbreviations Don't Match
+#### Issue 6: Team Abbreviations Don't Match
 **Symptoms:**
 - Teams not matching between draft_data and scraped data
 - "WARNING: Teams in scraped data but not in draft_data"
@@ -387,12 +488,13 @@ scraped_data <- scraped_data %>%
 **When Adding New Team Mappings:**
 1. Check plaintextsports.com abbreviation
 2. Check sportsline.com abbreviation
-3. Add to team_replacements if different
-4. Update in ALL chunks that standardize teams
+3. Check gambletron2000.com abbreviation (NEW)
+4. Add to team_replacements if different
+5. Update in ALL chunks that standardize teams
 
 ---
 
-#### Issue 6: Zero-Sum Matchups Not Detecting Correctly
+#### Issue 7: Zero-Sum Matchups Not Detecting Correctly
 **Symptoms:**
 - Zero-sum matchups table empty when it shouldn't be
 - Incorrectly identifying matchups as zero-sum
@@ -436,6 +538,43 @@ todays_picks %>%
 
 ---
 
+#### NEW Issue 8: Perfect Skins % Showing 0% Incorrectly
+**Symptoms:**
+- Player has >5 games but shows 0%
+- Should have non-zero probability
+- All games are legitimate (no self-matchups)
+
+**Root Cause:**
+- One or more games missing Live_Expected_Skins value
+- NA values causing product to fail
+- Self zero-sum detection triggering incorrectly
+
+**Solution:**
+```r
+# Check for NA values in Live_Expected_Skins
+todays_results %>%
+  filter(is.na(Live_Expected_Skins)) %>%
+  select(Player, Team, Pick, Expected_Skins, Live_Expected_Skins)
+
+# Verify self zero-sum detection
+self_zero_sum_players <- todays_results %>%
+  group_by(game_id, Player) %>%
+  filter(n() >= 2) %>%
+  pull(Player) %>%
+  unique()
+
+print(self_zero_sum_players)  # Should only include players with same-team matchups
+```
+
+**Verification:**
+```r
+# Manual calculation
+player_data <- todays_results %>% filter(Player == "Adam")
+prod(player_data$Live_Expected_Skins, na.rm = TRUE) * 100
+```
+
+---
+
 ### ⚠️ Common Warnings & What They Mean
 
 #### Warning: "In blackout window, but file not found"
@@ -462,6 +601,14 @@ todays_picks %>%
 - Scraping error
 **Action:** Usually safe to ignore if only a few rows; investigate if widespread
 
+#### NEW Warning: "No live games found"
+**Meaning:** Gambletron scraping found no active NBA games
+**Usually Caused By:**
+- No games currently in progress
+- Off-day for NBA
+- Scraping timing issue
+**Action:** Normal during off-hours; investigate if during known game times
+
 ---
 
 ### 🎯 Debugging Tips & Techniques
@@ -477,6 +624,7 @@ cat("Current time (CT):", as.character(current_time_ct), "\n")
 cat("Skins date:", as.character(skins_date), "\n")
 cat("Blackout window?", is_blackout_window, "\n")
 cat("Number of games scraped:", nrow(todays_picks), "\n")
+cat("Live probabilities found:", sum(!is.na(todays_picks$Live_Expected_Skins)), "\n")
 ```
 
 #### Tip 2: Check Data Flow at Each Step
@@ -492,6 +640,7 @@ print(paste("Games after join:", nrow(todays_picks)))
 
 # Check for NAs
 print(paste("NA Expected Skins:", sum(is.na(todays_picks$`Expected Skins`))))
+print(paste("NA Live Expected:", sum(is.na(todays_picks$Live_Expected_Skins))))
 ```
 
 #### Tip 3: Validate Historical Data
@@ -540,6 +689,27 @@ test_data <- test_data %>%
 knitr::kable(test_data, escape = FALSE, format = "html")
 ```
 
+#### NEW Tip 5: Debug Live Probability Scraping
+```r
+# Test Gambletron scraping
+url_live <- "https://www.gambletron2000.com/live?sport=nba&team="
+response <- GET(url_live, user_agent("Mozilla/5.0"))
+webpage <- read_html(response)
+
+# Check for live games
+live_nodes <- webpage %>% html_elements("li.event-summary")
+cat("Found", length(live_nodes), "live NBA games\n")
+
+# Parse first game
+if (length(live_nodes) > 0) {
+  first_game <- live_nodes[1]
+  teams <- first_game %>% html_element("span.team") %>% html_text2()
+  probs <- first_game %>% html_elements("span.pull-right") %>% html_text()
+  cat("Teams:", teams, "\n")
+  cat("Probabilities:", probs, "\n")
+}
+```
+
 ---
 
 ## 🔍 Understanding System Architecture
@@ -551,6 +721,8 @@ knitr::kable(test_data, escape = FALSE, format = "html")
                                           ↓
                                     [Calculate Expected Skins]
                                           ↓
+[Gambletron2000.com] → [Live Prob Scraper] → [Live_Expected_Skins] (NEW)
+                                          ↓
                                     [Display Tables]
                                           ↓
 [Plaintextsports.com] → [Results Scraper] → [Won_Game Data]
@@ -558,6 +730,8 @@ knitr::kable(test_data, escape = FALSE, format = "html")
                                     [Join with todays_picks]
                                           ↓
                                     [todays_results]
+                                          ↓
+                                    [Calculate Cumulative Live Expected] (NEW)
                                           ↓
                                     [Save to CSV] → [skins_history/YYYY-MM-DD.csv]
                                           ↓
@@ -578,16 +752,32 @@ Current Time (CT)  →  Skins Date Calculation
 ### Blackout Window Logic
 
 ```
-Evening (11 PM) → Scrape one last time → Save CSV
+Evening (10:40 PM) → Last scheduled run (20-min interval)
                           ↓
                    [11 PM - 2 AM]
                           ↓
-                   Load from CSV only
+                   Load from CSV for Sportsline data
+                   Still scrape live probabilities (NEW)
                           ↓
-Morning (2 AM)  → Resume live scraping
+Morning (2 AM)  → Resume live scraping for all sources
 ```
 
-**Why?** Between 11 PM and 2 AM, odds sites may be inconsistent. We rely on the last good scrape saved to CSV.
+**Why?** Between 11 PM and 2 AM, odds sites may be inconsistent. We rely on the last good scrape saved to CSV for pre-game odds, but still update live probabilities.
+
+### NEW: Live Probability Logic
+
+```
+Game State          →  Data Source            →  Column Used
+-----------            ------------              -----------
+Not Started         →  Sportsline pre-game    →  Expected Skins
+In Progress         →  Gambletron live        →  Live Expected Skins
+Final               →  Plaintextsports result →  Actual Skins (0 or 1)
+
+Cumulative Calculation:
+- Sum(Actual Skins) for completed games
+- Sum(Live Expected) for in-progress games
+- Sum(Expected Skins) for not-started games
+```
 
 ---
 
@@ -600,15 +790,15 @@ skins_history/
 ├── 2025-10-25.csv
 ├── 2025-10-26.csv
 ├── ...
-├── 2025-11-01.csv
-├── ytd_baseline.csv    # Baseline cumulative stats
-└── baseline_date.txt   # Date baseline was updated
+├── 2025-11-10.csv      # Latest data
+├── ytd_baseline.csv    # Baseline cumulative stats (through Nov 4)
+└── baseline_date.txt   # Contains: "2025-11-05"
 ```
 
-### CSV File Format
+### CSV File Format (Updated)
 ```csv
-Date,Player,Team,Abbr,Pick,Expected_Skins,Won_Game,Actual_Skins,Skins_Luck
-2025-11-01,Adam,Boston Celtics,BOS,W,0.33059252352292956,NA,NA,NA
+Date,Player,Team,Abbr,Pick,Expected_Skins,Won_Game,Actual_Skins,Skins_Luck,game_id
+2025-11-10,Adam,Los Angeles Lakers,LAL,W,0.7515491810432606,NA,NA,NA,2025-11-10_1
 ```
 
 **Key Columns:**
@@ -617,48 +807,60 @@ Date,Player,Team,Abbr,Pick,Expected_Skins,Won_Game,Actual_Skins,Skins_Luck
 - `Team`: Full team name
 - `Abbr`: 2-3 letter abbreviation (must match draft_data)
 - `Pick`: W or L
-- `Expected_Skins`: Decimal 0-1
+- `Expected_Skins`: Decimal 0-1 (pre-game odds)
 - `Won_Game`: TRUE/FALSE/NA
 - `Actual_Skins`: 0, 1, or NA
 - `Skins_Luck`: Actual - Expected
+- `game_id`: YYYY-MM-DD_N format for matching teams in same game
+
+**Note:** Live_Expected_Skins is calculated at runtime, not stored in CSV
 
 ---
 
 ## 🚀 GitHub Actions Configuration
 
-### Workflow Schedule Explanation
+### NEW: Simplified Workflow Schedule
 
 ```yaml
-# Daytime runs (every 4 hours)
-- cron: '0 14 * * *'  #  9:00 AM CDT (14:00 UTC)
-- cron: '0 18 * * *'  #  1:00 PM CDT (18:00 UTC)
-- cron: '0 22 * * *'  #  5:00 PM CDT (22:00 UTC)
-
-# Evening runs (every 30 mins)
-- cron: '0 0 * * *'   #  7:00 PM CDT (00:00 UTC next day)
-- cron: '30 0 * * *'  #  7:30 PM CDT
-- cron: '0 1 * * *'   #  8:00 PM CDT
-# ... continues until 1:00 AM CDT
+on:
+  schedule:
+    - cron: '*/20 * * * *'  # Every 20 minutes, 24/7
+  workflow_dispatch:  # Manual trigger
 ```
 
-**Strategy:**
-- Daytime: Updates every 4 hours (low frequency when few games)
-- Evening: Updates every 30 mins (high frequency during prime game time)
-- Last run: 10:30 PM CDT (saves CSV before blackout window)
+**Previous Strategy (Deprecated):**
+- Complex schedule with different frequencies
+- Daytime runs every 4 hours
+- Evening runs every 30 minutes
+
+**NEW Strategy:**
+- **Single frequency:** Every 20 minutes around the clock
+- **Total runs:** 72 runs per day (3 per hour × 24 hours)
+- **Benefits:**
+  - Captures live probability changes more frequently
+  - Simpler configuration to maintain
+  - More consistent update intervals
+  - Better for international game times
+
+**UTC to Central Time Conversion:**
+- System runs on UTC time
+- Every 20 minutes = :00, :20, :40 of each hour UTC
+- Converts to all times CT (adjusts for DST automatically)
 
 ### Common GitHub Actions Issues
 
-#### Issue: Workflow Not Running
-**Symptoms:** No recent runs in Actions tab
+#### Issue: Workflow Not Running at Expected Frequency
+**Symptoms:** Gaps longer than 20 minutes between runs
 **Causes:**
-1. Workflow file syntax error
-2. Repository not set to allow Actions
-3. Quota exceeded (rare)
+1. GitHub Actions queue delay (platform issue)
+2. Repository quota exceeded
+3. Workflow disabled
 
 **Solution:**
-1. Check workflow file validity: https://www.yamllint.com/
-2. Settings → Actions → Allow all actions
-3. Check Actions usage limits
+1. Check Actions tab for status
+2. Verify workflow is enabled
+3. Check quota: Settings → Billing → Actions minutes
+4. GitHub may delay non-critical cron jobs during high load
 
 #### Issue: Workflow Fails During Render
 **Symptoms:** Red X on workflow run, error in logs
@@ -667,6 +869,7 @@ Date,Player,Team,Abbr,Pick,Expected_Skins,Won_Game,Actual_Skins,Skins_Luck
 2. Scraping returned empty data
 3. Quarto render error
 4. Network issue
+5. NEW: Gambletron site structure changed
 
 **Solution:**
 ```bash
@@ -678,6 +881,7 @@ Date,Player,Team,Abbr,Pick,Expected_Skins,Won_Game,Actual_Skins,Skins_Luck
 # 2. Add error handling to scraping code
 # 3. Update Quarto version
 # 4. Add retry logic for network calls
+# 5. Update Gambletron selectors if site changed
 ```
 
 #### Issue: Git Push Fails
@@ -689,7 +893,7 @@ Date,Player,Team,Abbr,Pick,Expected_Skins,Won_Game,Actual_Skins,Skins_Luck
 
 **Solution:**
 ```yaml
-# Add continue-on-error to prevent failure
+# Already implemented with continue-on-error
 - name: Commit history updates
   run: |
     git add skins_history/*.csv
@@ -717,7 +921,7 @@ start _site/index.html  # Windows
 ### Tip 2: Simulating Different Times
 ```r
 # Override current time for testing
-test_time <- as.POSIXct("2025-11-01 23:30:00", tz = "America/Chicago")
+test_time <- as.POSIXct("2025-11-10 23:30:00", tz = "America/Chicago")
 current_hour_ct <- hour(test_time)
 # Now test blackout window logic
 ```
@@ -742,7 +946,31 @@ for (file in all_files) {
 }
 ```
 
-### Tip 4: Monitoring System Health
+### NEW Tip 4: Testing Live Probability Features
+```r
+# Create mock live probability data
+mock_live_data <- data.frame(
+  Team = c("Boston Celtics", "Los Angeles Lakers"),
+  live_win_prob = c(0.65, 0.55)
+)
+
+# Join with todays_picks
+test_picks <- todays_picks %>%
+  left_join(mock_live_data, by = "Team") %>%
+  mutate(
+    Live_Expected_Skins = case_when(
+      Pick == "W" ~ live_win_prob,
+      Pick == "L" ~ 1 - live_win_prob,
+      TRUE ~ NA_real_
+    )
+  )
+
+# Verify calculations
+test_picks %>%
+  select(Team, Pick, `Expected Skins`, live_win_prob, Live_Expected_Skins)
+```
+
+### Tip 5: Monitoring System Health
 ```r
 # Create health check function
 check_system_health <- function() {
@@ -753,16 +981,20 @@ check_system_health <- function() {
   recent_dates <- as_date(str_extract(recent_files, "\\d{4}-\\d{2}-\\d{2}"))
   days_since_last <- as.numeric(Sys.Date() - max(recent_dates))
   health_report$days_since_last_file <- days_since_last
-  health_report$files_healthy <- days_since_last <= 2
+  health_report$files_healthy <- days_since_last <= 1
   
   # Check 2: Baseline date
   baseline_date <- as_date(readLines("skins_history/baseline_date.txt")[1])
   health_report$baseline_date <- baseline_date
-  health_report$baseline_current <- baseline_date >= (Sys.Date() - days(7))
+  health_report$baseline_current <- baseline_date == as_date("2025-11-05")
   
   # Check 3: YTD data completeness
   ytd_baseline <- read_csv("skins_history/ytd_baseline.csv", show_col_types = FALSE)
   health_report$all_players_in_baseline <- nrow(ytd_baseline) == 6
+  
+  # NEW Check 4: Recent workflow runs
+  health_report$expected_runs_per_day <- 72
+  health_report$expected_interval_minutes <- 20
   
   return(health_report)
 }
@@ -784,6 +1016,7 @@ print(health)
 - Expected skins calculated for each independently
 - At most one can win → zero-sum for that player
 - Max Skins reduced by 1 for this player
+- **Perfect Skins % = 0%** (impossible to win all skins)
 
 **Code Handling:**
 ```r
@@ -803,6 +1036,7 @@ self_zero_sum <- todays_picks %>%
 - Never gets Won_Game value
 - Remains NA in results
 - Does not contribute to YTD totals
+- **Live_Expected_Skins = Expected Skins** (no live update available)
 
 **Prevention:** System correctly handles NA values, no action needed
 
@@ -812,25 +1046,46 @@ self_zero_sum <- todays_picks %>%
 **Behavior:**
 - Plaintextsports.com shows final score including OT
 - Won_Game based on final result (correct)
+- **Live probabilities update throughout OT**
 - No special handling needed
 
-### Edge Case 4: Doubleheader (Rare)
+### NEW Edge Case 4: Live Odds Drastically Change
+**Scenario:** Team with 80% pre-game odds falls to 20% live odds
+
+**Behavior:**
+- Expected Skins remains at original value (0.80 if W pick)
+- Live Expected Skins updates to current value (0.20 if W pick)
+- Live Skins Luck shows -0.60 (massive negative swing)
+- User sees real-time how much "worse" things are going
+
+**Example:**
+```
+Player: Adam
+Team: Lakers (W pick)
+Expected Skins: 0.80 (pre-game odds)
+Live Expected: 0.25 (down 15 points in 4th quarter)
+Live Skins Luck: -0.55 (things going much worse)
+```
+
+### Edge Case 5: Doubleheader (Rare)
 **Scenario:** Same teams play twice in one day
 
 **Behavior:**
 - Both games scraped separately
-- game_id differentiates them
+- game_id differentiates them (game_1, game_2)
 - Both contribute to daily totals
+- Live probabilities tracked independently
 
 **Note:** NBA rarely has doubleheaders, but system handles them correctly
 
-### Edge Case 5: Date Line Issues
-**Scenario:** Game starts before midnight, ends after midnight
+### NEW Edge Case 6: Live Probabilities During Blackout
+**Scenario:** Games in progress during 11 PM - 2 AM blackout window
 
 **Behavior:**
-- Assigned to date based on scheduled start time
-- 2 AM rollover ensures game is complete before date change
-- Historical scraping uses date-specific URL, gets correct game
+- Pre-game odds loaded from CSV
+- **Live probabilities still scraped** (NEW)
+- Best of both worlds: stable baseline + real-time updates
+- User sees most accurate current expectations
 
 ---
 
@@ -873,7 +1128,7 @@ data %>%
 
 ### Pattern 4: Grouped Calculations
 ```r
-# GOOD: Use group_by with summarise
+# GOOD: Use group_by with summarise and always drop groups
 result <- data %>%
   group_by(game_id) %>%
   summarise(
@@ -903,6 +1158,37 @@ Player_Display = cell_spec(
 
 # BAD: Missing format parameter
 Player_Display = cell_spec(Player, background = "#90EE90")  # Won't work
+```
+
+### NEW Pattern 6: Live Probability Integration
+```r
+# GOOD: Conditional update based on game state
+todays_picks <- todays_picks %>%
+  left_join(live_data, by = "Team") %>%
+  mutate(
+    Live_Expected_Skins = case_when(
+      is.na(live_win_prob) ~ Live_Expected_Skins,  # Keep existing if no new data
+      Pick == "W" ~ live_win_prob,
+      Pick == "L" ~ 1 - live_win_prob,
+      TRUE ~ Live_Expected_Skins
+    )
+  )
+
+# BAD: Overwrite without checking
+todays_picks$Live_Expected_Skins <- live_win_prob  # Loses existing values
+```
+
+### NEW Pattern 7: Cumulative Live Expected Calculation
+```r
+# GOOD: Use actual results when available, live when not
+Cumulative_Live_Expected = if_else(
+  !is.na(Won_Game), 
+  Actual_Skins,           # Use actual (0 or 1) for completed games
+  Live_Expected_Skins     # Use live probability for in-progress
+)
+
+# BAD: Always use live probabilities
+Cumulative_Live_Expected = Live_Expected_Skins  # Wrong for completed games
 ```
 
 ---
@@ -961,10 +1247,13 @@ du -sh skins_history/
 ls skins_history/*.csv | wc -l
 
 # View last 10 lines of CSV
-tail -10 skins_history/2025-11-01.csv
+tail -10 skins_history/2025-11-10.csv
 
 # Search for specific player
 grep "Adam" skins_history/*.csv
+
+# Check for game_id column (new format)
+head -1 skins_history/2025-11-10.csv
 ```
 
 ---
@@ -973,27 +1262,37 @@ grep "Adam" skins_history/*.csv
 
 ### Documentation Coverage
 - **Total Documentation Files:** 20+ files
-- **Total Documentation Lines:** ~3,500+ lines
-- **Core Documentation:** ~1,000 lines (3 essential files)
+- **Total Documentation Lines:** ~4,000+ lines (updated)
+- **Core Documentation:** ~1,200 lines (3 essential files)
 - **Average Doc File Size:** ~150 lines
 - **Most Comprehensive:** COMPLETE_PROJECT_DOCUMENTATION.md (400+ lines)
 - **Most Referenced:** CHAT_HANDOFF_TEMPLATE.md
+- **This README:** ~2,000 lines (comprehensive)
 
 ### Code Statistics
 - **Main Code File:** skins_today.qmd
-- **Total Lines:** ~1,200 lines
-- **R Code Chunks:** 15+ chunks
+- **Total Lines:** ~1,300 lines (updated with live features)
+- **R Code Chunks:** 18+ chunks (added live scraping chunks)
 - **Functions Defined:** 5+ helper functions
-- **Data Sources:** 2 external websites
+- **Data Sources:** 3 external websites (added Gambletron)
 - **Tables Generated:** 10+ tables
 - **Charts Generated:** 2 charts
 
 ### Historical Data
 - **Start Date:** October 24, 2025
-- **Total Days Tracked:** 8+ days
-- **Games per Day:** ~5-12 games
+- **Baseline Date:** November 5, 2025 (includes Oct 24 - Nov 4)
+- **Current Date:** November 10, 2025
+- **Total Days Tracked:** 18 days
+- **Games per Day:** ~5-15 games
 - **Players Tracked:** 6 players
 - **Teams Tracked:** 30 NBA teams
+
+### NEW: Performance Metrics
+- **GitHub Actions Frequency:** Every 20 minutes
+- **Runs per Day:** 72 runs
+- **Scraping Sources:** 3 sites per run
+- **Update Latency:** <20 minutes during games
+- **Data Freshness:** Live probabilities updated continuously
 
 ---
 
@@ -1002,18 +1301,21 @@ grep "Adam" skins_history/*.csv
 ### Data Sources
 - **Sportsline.com:** Public betting odds (no authentication required)
 - **Plaintextsports.com:** Public game scores (no authentication required)
+- **Gambletron2000.com:** Public win probabilities (no authentication required) (NEW)
 
 ### No Sensitive Data
 - No personal information stored
 - No betting transactions
 - No financial data
 - Only publicly available sports data
+- No user tracking or analytics
 
 ### GitHub Pages
 - Static site (no server-side code)
 - No user authentication
 - No data collection
 - Public access
+- No cookies or tracking scripts
 
 ---
 
@@ -1026,31 +1328,39 @@ grep "Adam" skins_history/*.csv
 4. **Best/worst picks** - Teams that consistently over/underperform
 5. **Email notifications** - Daily summary emails
 6. **Mobile optimization** - Better mobile layouts
-7. **Interactive charts** - Plotly instead of ggplot2
+7. **Interactive charts** - Plotly instead of ggplot2 for drill-down
 8. **API endpoint** - Programmatic access to data
 9. **Export functionality** - Download data as Excel
-10. **Live updates** - WebSocket for real-time score updates
+10. **WebSocket integration** - True real-time updates (sub-minute)
+11. **NEW: Probability history charts** - Track how live odds changed over time
+12. **NEW: Comeback tracker** - Identify biggest comebacks/collapses
+13. **NEW: Live alerts** - Notify when odds swing dramatically
+14. **NEW: Prop bet integration** - Track player props alongside team picks
 
 ### Known Limitations
 1. **Historical data limited** - Only goes back to Oct 24, 2025
-2. **No automated alerts** - Must check page manually
-3. **Single sport** - Only NBA (could expand)
+2. **Update frequency** - 20-minute intervals (not true real-time)
+3. **Single sport** - Only NBA (could expand to NFL, NHL, etc.)
 4. **Basic visualizations** - Could add more chart types
 5. **No user accounts** - Everyone sees same data
+6. **Live odds dependency** - Relies on Gambletron availability
+7. **No mobile app** - Web-only interface
 
 ---
 
 ## 🎯 Success Checklist
 
 ### Daily Operation Verification
-- [ ] GitHub Actions ran successfully (check Actions tab)
+- [ ] GitHub Actions ran successfully (check Actions tab - should be every 20 min)
 - [ ] New CSV file created in skins_history/
 - [ ] Today's games visible on page
 - [ ] Results populated for completed games
+- [ ] **Live probabilities updating for in-progress games** (NEW)
 - [ ] Color coding working on all tables
-- [ ] Yesterday's section shows correct date
-- [ ] YTD totals look reasonable
+- [ ] Yesterday's section shows correct date and matchups
+- [ ] YTD totals look reasonable (compare to baseline + days since Nov 5)
 - [ ] Charts displaying correctly
+- [ ] **Perfect Skins % calculated correctly** (NEW)
 - [ ] No error messages visible
 
 ### Weekly Maintenance
@@ -1061,21 +1371,25 @@ grep "Adam" skins_history/*.csv
 - [ ] Review player totals for anomalies
 - [ ] Test page on different browsers
 - [ ] Check mobile display
+- [ ] **Verify live probability feature working during game times** (NEW)
+- [ ] **Check for Gambletron site changes** (NEW)
 
 ### Monthly Tasks
-- [ ] Update ytd_baseline.csv (if needed)
+- [ ] Update ytd_baseline.csv (if major recalculation needed)
 - [ ] Review and clean up old branches
 - [ ] Check for package updates
 - [ ] Review documentation accuracy
-- [ ] Archive old documentation
+- [ ] Archive old documentation versions
 - [ ] Performance optimization review
+- [ ] **Review 20-minute schedule effectiveness** (NEW)
+- [ ] **Evaluate need for more frequent updates** (NEW)
 
 ---
 
 ## 📞 Getting Help
 
 ### When Things Break
-1. **Check this README** → Troubleshooting section
+1. **Check this README** → Troubleshooting section (Issue 1-8)
 2. **Check QUICK_REFERENCE.md** → Common issues
 3. **Check COMPLETE_PROJECT_DOCUMENTATION.md** → Detailed troubleshooting
 4. **Check specific fix docs** → Recent issues
@@ -1098,6 +1412,18 @@ New Chat → CHAT_HANDOFF_TEMPLATE.md
 
 ## 📝 Document Change Log
 
+### November 10, 2025
+- **MAJOR UPDATE:** Comprehensive revision for live probability features
+- Added NEW Issue 8: Perfect Skins % troubleshooting
+- Added NEW Edge Cases 4 & 6: Live odds changes and blackout window behavior
+- Added NEW Patterns 6 & 7: Live probability integration
+- Updated GitHub Actions section for 20-minute schedule
+- Added Gambletron2000.com as third data source
+- Updated all code examples with live features
+- Added debugging tips for live probability scraping
+- Updated statistics with current project status
+- Added 9 new future enhancement ideas focused on live features
+
 ### November 1, 2025
 - Created enhanced README with comprehensive troubleshooting
 - Added extensive edge case documentation
@@ -1117,10 +1443,13 @@ New Chat → CHAT_HANDOFF_TEMPLATE.md
 
 ### Essential Files to Backup
 1. **skins_history/** - All CSV files (most critical)
-2. **CHAT_HANDOFF_TEMPLATE.md** - For continuity
-3. **QUICK_REFERENCE.md** - For quick reference
-4. **COMPLETE_PROJECT_DOCUMENTATION.md** - Complete info
-5. **skins_today.qmd** - Source code
+2. **skins_history/ytd_baseline.csv** - Baseline data through Nov 4
+3. **skins_history/baseline_date.txt** - Critical for YTD calculations
+4. **CHAT_HANDOFF_TEMPLATE.md** - For continuity
+5. **QUICK_REFERENCE.md** - For quick reference
+6. **COMPLETE_PROJECT_DOCUMENTATION.md** - Complete info
+7. **skins_today.qmd** - Source code with live features
+8. **.github/workflows/render-skins.yml** - Workflow configuration
 
 ### Backup Strategy
 ```bash
@@ -1135,10 +1464,15 @@ tar -czf nba-skins-backup-$(date +%Y%m%d).tar.gz \
 tar -xzf nba-skins-backup-YYYYMMDD.tar.gz
 ```
 
+### Critical Files - Never Delete
+- `skins_history/ytd_baseline.csv` - Contains Oct 24 - Nov 4 cumulative data
+- `skins_history/baseline_date.txt` - Must contain "2025-11-05"
+- All CSV files from Nov 5 onward - These add to baseline
+
 ### Cloud Backup Options
-- GitHub repository (already backed up)
-- Google Drive / Dropbox (manual backup)
-- AWS S3 / Azure Blob (for automation)
+- GitHub repository (already backed up automatically)
+- Google Drive / Dropbox (manual backup recommended weekly)
+- AWS S3 / Azure Blob (for automated backups)
 
 ---
 
@@ -1152,31 +1486,55 @@ tar -xzf nba-skins-backup-YYYYMMDD.tar.gz
 ### Web Scraping
 - [rvest Documentation](https://rvest.tidyverse.org/)
 - [SelectorGadget](https://selectorgadget.com/) - For finding CSS selectors
+- [Chrome DevTools](https://developer.chrome.com/docs/devtools/) - Inspect page structure
 
 ### GitHub Actions
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [GitHub Actions for R](https://github.com/r-lib/actions)
+- [Cron Schedule Syntax](https://crontab.guru/)
+
+### NBA Data & Analytics
+- [NBA.com Stats](https://www.nba.com/stats/)
+- [Basketball Reference](https://www.basketball-reference.com/)
+- [Sportsline.com](https://www.sportsline.com/nba/) - Odds data source
 
 ---
 
 ## ✅ Final Notes
 
-This project is **fully functional and production-ready** as of November 1, 2025. All documentation is current and accurate. The system runs automatically via GitHub Actions and requires minimal maintenance.
+This project is **fully functional and production-ready** as of November 10, 2025. All documentation is current and accurate. The system runs automatically via GitHub Actions every 20 minutes and requires minimal maintenance.
 
 ### Key Success Factors
 1. ✅ Comprehensive documentation
-2. ✅ Automated deployment
+2. ✅ Automated deployment (every 20 minutes)
 3. ✅ Robust error handling
-4. ✅ Historical data preservation
+4. ✅ Historical data preservation with baseline system
 5. ✅ Clear troubleshooting guides
 6. ✅ Active maintenance strategy
+7. ✅ **Live probability integration** (NEW)
+8. ✅ **Real-time skin tracking** (NEW)
+9. ✅ **Simplified workflow schedule** (NEW)
 
 ### Project Status: STABLE & PRODUCTION
 
-**Last Updated:** November 1, 2025  
-**Version:** 2.0  
-**Status:** Production-ready with comprehensive documentation
+**Current Version:** 3.0 (Live Probabilities Update)  
+**Last Major Update:** November 10, 2025  
+**Status:** Production-ready with real-time features  
+**Baseline Date:** November 5, 2025 (includes Oct 24 - Nov 4)  
+**Data Through:** November 10, 2025  
+**Update Frequency:** Every 20 minutes  
+**Features:** Pre-game odds, live probabilities, real-time results, YTD tracking
+
+### What Makes This Version Special
+- **Three data sources** working in harmony
+- **Continuous updates** via 20-minute schedule
+- **Live probability tracking** during games
+- **Perfect Skins %** calculation for daily excitement
+- **Comprehensive documentation** covering all scenarios
+- **Battle-tested** baseline system for YTD accuracy
 
 ---
 
-**Remember:** When in doubt, start with CHAT_HANDOFF_TEMPLATE.md for new sessions, use QUICK_REFERENCE.md for quick lookups, and dive into COMPLETE_PROJECT_DOCUMENTATION.md for deep understanding. This README ties it all together!
+**Remember:** When in doubt, start with CHAT_HANDOFF_TEMPLATE.md for new sessions, use QUICK_REFERENCE.md for quick lookups, and dive into COMPLETE_PROJECT_DOCUMENTATION.md for deep understanding. This README ties it all together and now includes complete coverage of the live probability features!
+
+**Pro Tip:** The system is most interesting to watch during actual game times (evenings/weekends) when live probabilities update and show how games are really going versus expectations. That's when the "Live Skins Luck" metric really shines! 🏀📊
