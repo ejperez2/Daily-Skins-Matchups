@@ -1152,12 +1152,12 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
                     bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         TRUE ~ Player
       ),
-      # Apply color coding to Live Skins Luck column
+      # Apply color coding to Live Skins Luck column - exclude values between -0.1 and 0.1
       `Live Skins Luck Display` = case_when(
-        `Live Skins Luck` > 0 ~ 
+        `Live Skins Luck` > 0.1 ~ 
           cell_spec(sprintf("%.1f", `Live Skins Luck`), background = "#90EE90", color = "#000000 !important", 
                     bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        `Live Skins Luck` < 0 ~ 
+        `Live Skins Luck` < -0.1 ~ 
           cell_spec(sprintf("%.1f", `Live Skins Luck`), background = "#FFB6C6", color = "#000000 !important", 
                     bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         TRUE ~ as.character(sprintf("%.1f", `Live Skins Luck`))
@@ -1438,14 +1438,32 @@ if (file.exists(yesterday_file)) {
             `Total Actual Skins` = Total_Actual_Skins,
             `Skins Luck` = Skins_Luck_Total
           ) %>%
-          arrange(desc(`Skins Luck`))
+          arrange(desc(`Skins Luck`)) %>%
+          mutate(
+            # Apply color coding to Player column
+            Player_Display = case_when(
+              `Skins Luck` > 0 ~ 
+                cell_spec(Player, background = "#90EE90", color = "#000000 !important", 
+                          bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+              `Skins Luck` < 0 ~ 
+                cell_spec(Player, background = "#FFB6C6", color = "#000000 !important", 
+                          bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+              TRUE ~ Player
+            )
+          ) %>%
+          select(
+            Player = Player_Display,
+            `Total Expected Skins`,
+            `Total Actual Skins`,
+            `Skins Luck`
+          )
         
         # Add TOTAL row
         total_row <- data.frame(
           Player = "TOTAL",
-          `Total Expected Skins` = sum(yesterday_player_summary$`Total Expected Skins`, na.rm = TRUE),
-          `Total Actual Skins` = sum(yesterday_player_summary$`Total Actual Skins`, na.rm = TRUE),
-          `Skins Luck` = sum(yesterday_player_summary$`Skins Luck`, na.rm = TRUE),
+          `Total Expected Skins` = sum(yesterday_with_game$Expected_Skins, na.rm = TRUE),
+          `Total Actual Skins` = sum(yesterday_with_game$Actual_Skins, na.rm = TRUE),
+          `Skins Luck` = sum(yesterday_with_game$Skins_Luck, na.rm = TRUE),
           check.names = FALSE,
           stringsAsFactors = FALSE
         )
@@ -1558,7 +1576,7 @@ if (nrow(ytd_data) > 0) {
       Total_Actual_Skins = coalesce(Total_Actual_Skins_baseline, 0) + coalesce(Total_Actual_Skins_new, 0),
       Cumulative_Skins_Luck = coalesce(Cumulative_Skins_Luck_baseline, 0) + coalesce(Cumulative_Skins_Luck_new, 0)
     ) %>%
-    select(Player, Games, Total_Expected_Skins, Total_Actual_Skins, Cumulative_Skins_Luck) %>%
+    select(Player, Cumulative_Skins_Luck, Games, Total_Expected_Skins, Total_Actual_Skins) %>%
     mutate(
       Expected_Skins_Pct = if_else(Games == 0, 0, (Total_Expected_Skins / Games) * 100),
       Avg_Skins_Luck_per_Game = if_else(Games == 0, 0, Cumulative_Skins_Luck / Games)
@@ -1580,10 +1598,10 @@ if (nrow(ytd_data) > 0) {
   
   total_row <- data.frame(
     Player = "TOTAL",
+    `Cumulative Skins Luck` = total_luck,
     Games = total_games,
     `Total Expected Skins` = total_expected,
     `Total Actual Skins` = total_actual,
-    `Cumulative Skins Luck` = total_luck,
     `Expected Skins %` = weighted_avg_expected_pct,
     `Avg Skins Luck per Game` = weighted_avg_luck,
     check.names = FALSE
@@ -1591,13 +1609,61 @@ if (nrow(ytd_data) > 0) {
   
   ytd_summary_with_total <- bind_rows(ytd_summary, total_row)
   
+  # Apply gradient color to Cumulative Skins Luck column
+  max_luck <- max(ytd_summary$`Cumulative Skins Luck`, na.rm = TRUE)
+  min_luck <- min(ytd_summary$`Cumulative Skins Luck`, na.rm = TRUE)
+  
+  ytd_summary_with_total <- ytd_summary_with_total %>%
+    mutate(
+      `Cumulative Skins Luck Display` = if_else(
+        Player == "TOTAL",
+        as.character(sprintf("%.1f", `Cumulative Skins Luck`)),
+        case_when(
+          `Cumulative Skins Luck` == 0 ~ as.character(sprintf("%.1f", `Cumulative Skins Luck`)),
+          `Cumulative Skins Luck` > 0 ~ {
+            intensity <- (`Cumulative Skins Luck` / max_luck)
+            # Gradient from white (255,255,255) to green (144,238,144)
+            r_val <- as.integer(255 - (111 * intensity))
+            g_val <- as.integer(255 - (17 * intensity))
+            b_val <- as.integer(255 - (111 * intensity))
+            cell_spec(
+              sprintf("%.1f", `Cumulative Skins Luck`),
+              background = sprintf("rgb(%d, %d, %d)", r_val, g_val, b_val),
+              color = "#000000 !important",
+              bold = TRUE,
+              format = "html",
+              extra_css = "color: #000000 !important;"
+            )
+          },
+          `Cumulative Skins Luck` < 0 ~ {
+            intensity <- (abs(`Cumulative Skins Luck`) / abs(min_luck))
+            # Gradient from white (255,255,255) to red (255,182,198)
+            r_val <- 255
+            g_val <- as.integer(255 - (73 * intensity))
+            b_val <- as.integer(255 - (57 * intensity))
+            cell_spec(
+              sprintf("%.1f", `Cumulative Skins Luck`),
+              background = sprintf("rgb(%d, %d, %d)", r_val, g_val, b_val),
+              color = "#000000 !important",
+              bold = TRUE,
+              format = "html",
+              extra_css = "color: #000000 !important;"
+            )
+          }
+        )
+      )
+    ) %>%
+    select(-`Cumulative Skins Luck`) %>%
+    rename(`Cumulative Skins Luck` = `Cumulative Skins Luck Display`)
+  
   knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats"), escape = FALSE, format = "html") %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(c(5, 6), bold = TRUE) %>%
+    column_spec(2, bold = TRUE) %>%
     row_spec(nrow(ytd_summary_with_total), bold = TRUE, background = "#444444")
 
 } else {
   ytd_summary <- ytd_baseline %>%
+    select(Player, Cumulative_Skins_Luck, Games, Total_Expected_Skins, Total_Actual_Skins) %>%
     mutate(
       Expected_Skins_Pct = if_else(Games == 0, 0, (Total_Expected_Skins / Games) * 100),
       Avg_Skins_Luck_per_Game = if_else(Games == 0, 0, Cumulative_Skins_Luck / Games)
@@ -1619,20 +1685,67 @@ if (nrow(ytd_data) > 0) {
   
   total_row <- data.frame(
     Player = "TOTAL",
+    `Cumulative Skins Luck` = total_luck,
     Games = total_games,
     `Total Expected Skins` = total_expected,
     `Total Actual Skins` = total_actual,
-    `Cumulative Skins Luck` = total_luck,
     `Expected Skins %` = weighted_avg_expected_pct,
     `Avg Skins Luck per Game` = weighted_avg_luck,
     check.names = FALSE
   )
   
   ytd_summary_with_total <- bind_rows(ytd_summary, total_row)
+  
+  # Apply gradient color to Cumulative Skins Luck column
+  max_luck <- max(ytd_summary$`Cumulative Skins Luck`, na.rm = TRUE)
+  min_luck <- min(ytd_summary$`Cumulative Skins Luck`, na.rm = TRUE)
+  
+  ytd_summary_with_total <- ytd_summary_with_total %>%
+    mutate(
+      `Cumulative Skins Luck Display` = if_else(
+        Player == "TOTAL",
+        as.character(sprintf("%.1f", `Cumulative Skins Luck`)),
+        case_when(
+          `Cumulative Skins Luck` == 0 ~ as.character(sprintf("%.1f", `Cumulative Skins Luck`)),
+          `Cumulative Skins Luck` > 0 ~ {
+            intensity <- (`Cumulative Skins Luck` / max_luck)
+            # Gradient from white (255,255,255) to green (144,238,144)
+            r_val <- as.integer(255 - (111 * intensity))
+            g_val <- as.integer(255 - (17 * intensity))
+            b_val <- as.integer(255 - (111 * intensity))
+            cell_spec(
+              sprintf("%.1f", `Cumulative Skins Luck`),
+              background = sprintf("rgb(%d, %d, %d)", r_val, g_val, b_val),
+              color = "#000000 !important",
+              bold = TRUE,
+              format = "html",
+              extra_css = "color: #000000 !important;"
+            )
+          },
+          `Cumulative Skins Luck` < 0 ~ {
+            intensity <- (abs(`Cumulative Skins Luck`) / abs(min_luck))
+            # Gradient from white (255,255,255) to red (255,182,198)
+            r_val <- 255
+            g_val <- as.integer(255 - (73 * intensity))
+            b_val <- as.integer(255 - (57 * intensity))
+            cell_spec(
+              sprintf("%.1f", `Cumulative Skins Luck`),
+              background = sprintf("rgb(%d, %d, %d)", r_val, g_val, b_val),
+              color = "#000000 !important",
+              bold = TRUE,
+              format = "html",
+              extra_css = "color: #000000 !important;"
+            )
+          }
+        )
+      )
+    ) %>%
+    select(-`Cumulative Skins Luck`) %>%
+    rename(`Cumulative Skins Luck` = `Cumulative Skins Luck Display`)
     
   knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats (Baseline)"), escape = FALSE, format = "html") %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(c(5, 6), bold = TRUE) %>%
+    column_spec(2, bold = TRUE) %>%
     row_spec(nrow(ytd_summary_with_total), bold = TRUE, background = "#444444")
 }
 ```
@@ -1732,91 +1845,4 @@ p2 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Expected, color = Player, 
   scale_color_brewer(palette = "Set2")
 
 print(p2)
-```
-
----
-
-## Diagnostic Information
-
-```{r diagnostics}
-#| echo: false
-#| results: 'asis'
-
-cat("\n\n### Live Data Matching Diagnostics\n\n")
-
-# Diagnostic 1: Teams in todays_picks without Live_Expected_Skins
-if (exists("todays_picks") && nrow(todays_picks) > 0) {
-  teams_missing_live <- todays_picks %>%
-    filter(is.na(Live_Expected_Skins)) %>%
-    select(Team, Abbr, Player, Pick, `Expected Skins`)
-  
-  if (nrow(teams_missing_live) > 0) {
-    cat("**Issue #1: Teams Missing Live Expected Skins**\n\n")
-    cat("These teams from today's picks did NOT get matched with live data from Gambletron:\n\n")
-    print(kable(teams_missing_live, format = "html") %>%
-      kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE))
-    cat("\n\n")
-  } else {
-    cat("✓ **Issue #1 Status: RESOLVED** - All teams have live expected skins values\n\n")
-  }
-}
-
-# Diagnostic 2: Teams from Gambletron that weren't standardized
-if (exists("nba_today") && exists("live_data_final")) {
-  original_teams <- unique(c(nba_today$team_1, nba_today$team_2))
-  standardized_teams <- unique(live_data_final$Team)
-  
-  # Check if any original teams don't appear in standardized list
-  # (this would indicate a standardization failure)
-  cat("**Issue #2: Gambletron Team Names**\n\n")
-  cat(paste0("- Original team names from Gambletron: ", length(original_teams), "\n"))
-  cat(paste0("- Successfully standardized: ", length(standardized_teams), "\n\n"))
-  
-  if (length(original_teams) > length(standardized_teams)) {
-    cat("⚠ **Warning:** Some Gambletron team names may have been duplicates or failed to standardize\n\n")
-  } else {
-    cat("✓ All Gambletron team names were processed\n\n")
-  }
-}
-
-# Diagnostic 3: Summary of Live_Expected_Skins in matchup table
-if (exists("matchup_prep")) {
-  live_summary <- matchup_prep %>%
-    summarise(
-      Total_Games = n(),
-      Games_With_Live_Data = sum(!is.na(Live_Expected_Skins)),
-      Games_Missing_Live_Data = sum(is.na(Live_Expected_Skins)),
-      Pct_With_Live_Data = mean(!is.na(Live_Expected_Skins)) * 100
-    )
-  
-  cat("**Issue #3: Live Data Coverage in Matchup Table**\n\n")
-  cat(paste0("- Total games today: ", live_summary$Total_Games, "\n"))
-  cat(paste0("- Games with live data: ", live_summary$Games_With_Live_Data, "\n"))
-  cat(paste0("- Games missing live data: ", live_summary$Games_Missing_Live_Data, "\n"))
-  cat(paste0("- Coverage percentage: ", sprintf("%.1f", live_summary$Pct_With_Live_Data), "%\n\n"))
-  
-  if (live_summary$Pct_With_Live_Data == 100) {
-    cat("✓ **Issue #3 Status: RESOLVED** - All games have live data\n\n")
-  } else {
-    cat("⚠ **Issue #3 Status: PARTIAL** - Some games still missing live data\n\n")
-  }
-}
-
-# Diagnostic 4: Check for distinct() issues
-if (exists("live_data_final")) {
-  cat("**Issue #4: Duplicate Removal Check**\n\n")
-  cat(paste0("- Unique teams in live_data_final: ", nrow(live_data_final), "\n"))
-  cat(paste0("- Expected NBA teams: 30\n\n"))
-  
-  if (nrow(live_data_final) > 30) {
-    cat("⚠ **Warning:** More than 30 teams found - possible duplicates remaining\n\n")
-  } else if (nrow(live_data_final) < 30) {
-    cat("⚠ **Warning:** Fewer than 30 teams found - some games may not be scraped yet\n\n")
-  } else {
-    cat("✓ Correct number of teams found\n\n")
-  }
-}
-
-cat("\n---\n\n")
-cat("*Note: Missing live data for games that haven't started yet is expected behavior.*\n")
 ```
