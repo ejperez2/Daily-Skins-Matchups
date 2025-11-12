@@ -45,19 +45,9 @@ cat(paste0("<p style='font-size:14px; color:#999;'><strong>Last updated:</strong
 
 # --- Part 0: Define Time and Data Source ---
 
-# CRITICAL: Get current time in multiple formats for debugging
-system_time <- Sys.time()
-system_tz <- Sys.timezone()
+# Get current time in Chicago
 current_time_ct <- now(tzone = "America/Chicago")
 current_hour_ct <- hour(current_time_ct)
-
-# Store for diagnostics
-time_debug_info <- list(
-  system_time = system_time,
-  system_timezone = system_tz,
-  chicago_time = current_time_ct,
-  chicago_hour = current_hour_ct
-)
 
 # Define the "skins date" based on the 2 AM cutoff.
 # A "day" runs from 2:00 AM to 1:59 AM the next morning.
@@ -112,9 +102,6 @@ draft_data <- tribble(
 )
 
 # --- Part 1: Get Data (Conditional) ---
-csv_was_used <- FALSE
-csv_file_used <- NA_character_
-
 if (use_csv_for_sportsline) {
   file_path <- file.path(history_dir, paste0(skins_date, ".csv"))
   
@@ -127,15 +114,10 @@ if (use_csv_for_sportsline) {
           "Expected Skins" = Expected_Skins,
           Moneyline = NA_real_,
           "Implied Prob" = NA_real_,
-          # CRITICAL: Always reset Live_Expected_Skins to NA - never trust CSV values
-          # We will recalculate from fresh Gambletron scrape
           Live_Expected_Skins = NA_real_
         ) %>%
         select(Date, Team, Pick, "Expected Skins", Player, Moneyline, "Implied Prob", Abbr, game_id, Won_Game, Actual_Skins, Skins_Luck, Live_Expected_Skins) %>%
         arrange(desc(`Expected Skins`))
-      
-      csv_was_used <- TRUE
-      csv_file_used <- file_path
         
     } else {
       use_csv_for_sportsline <- FALSE
@@ -277,8 +259,9 @@ if (nrow(todays_picks) > 0) {
 # This chunk scrapes live win probabilities from gambletron
 # and joins them with our 'todays_picks' data.
 
-# Initialize diagnostic data frame
-gambletron_diagnostics <- data.frame()
+# Initialize diagnostic data frames
+gambletron_raw_scrape <- data.frame()
+gambletron_processing_log <- data.frame()
 
 # Always scrape live data regardless of blackout window
 # --- Define URLs ---
@@ -286,82 +269,105 @@ url_live <- "https://www.gambletron2000.com/live?sport=nba&team="
 url_inactive <- "https://www.gambletron2000.com/inactive?sport=nba&s=start_time&team="
 
 # --- 1. Scrape "Live!" Games ---
-response_live <- GET(url_live, user_agent("Mozilla/5.0"))
-webpage_live <- read_html(response_live)
-
-live_nodes <- webpage_live %>% html_elements("li.event-summary")
-
-live_games <- live_nodes %>%
-  lapply(function(node) {
-    teams_text <- node %>% 
-      html_element("span.team") %>% 
-      html_text2() %>% 
-      trimws()
-    
-    teams <- strsplit(teams_text, "\n")[[1]]
-    
-    probs <- node %>% 
-      html_elements("span.pull-right") %>% 
-      html_text() %>% 
-      trimws()
-    
-    data.frame(
-      status = "Live",
-      team_1 = trimws(teams[1]),
-      team_2 = trimws(teams[2]),
-      team_1_prob = probs[1],
-      team_2_prob = probs[2],
-      game_date = NA_character_,
-      sport = trimws(html_element(node, ".sport .sport-emoji") %>% html_attr("alt"))
-    )
-  }) %>%
-  bind_rows()
+tryCatch({
+  response_live <- GET(url_live, user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"))
+  webpage_live <- read_html(response_live)
+  
+  live_nodes <- webpage_live %>% html_elements("li.event-summary")
+  
+  live_games <- live_nodes %>%
+    lapply(function(node) {
+      # ENHANCED: More robust extraction with error handling
+      teams_text <- tryCatch({
+        node %>% 
+          html_element("span.team") %>% 
+          html_text2() %>% 
+          trimws()
+      }, error = function(e) NA_character_)
+      
+      teams <- if (!is.na(teams_text)) strsplit(teams_text, "\n")[[1]] else c(NA, NA)
+      
+      # CRITICAL FIX: Extract probabilities more carefully
+      prob_elements <- node %>% html_elements("span.pull-right")
+      probs <- if (length(prob_elements) >= 2) {
+        prob_elements %>% 
+          html_text() %>% 
+          trimws() %>%
+          head(2)  # Take only first 2 probabilities
+      } else {
+        c(NA_character_, NA_character_)
+      }
+      
+      data.frame(
+        status = "Live",
+        team_1 = if(length(teams) >= 1) trimws(teams[1]) else NA_character_,
+        team_2 = if(length(teams) >= 2) trimws(teams[2]) else NA_character_,
+        team_1_prob = if(length(probs) >= 1) probs[1] else NA_character_,
+        team_2_prob = if(length(probs) >= 2) probs[2] else NA_character_,
+        game_date = NA_character_,
+        sport = tryCatch({
+          trimws(html_element(node, ".sport .sport-emoji") %>% html_attr("alt"))
+        }, error = function(e) NA_character_)
+      )
+    }) %>%
+    bind_rows()
+}, error = function(e) {
+  live_games <- data.frame()
+})
 
 # --- 2. Scrape "Inactive" Games (Starting Later & Finished) ---
-response_inactive <- GET(url_inactive, user_agent("Mozilla/5.0"))
-webpage_inactive <- read_html(response_inactive)
-
-# --- 2a. Parse "Starting Later" ---
-starting_later_nodes <- webpage_inactive %>% 
-  html_elements("#later-container a.event-link")
-
-starting_later_games <- starting_later_nodes %>%
-  lapply(function(node) {
-    data.frame(
-      status = "Starting Later",
-      team_1 = trimws(html_element(node, ".team .away") %>% html_text()),
-      team_2 = trimws(html_element(node, ".team .home") %>% html_text()),
-      team_1_prob = trimws(html_element(node, ".prob .away") %>% html_text()),
-      team_2_prob = trimws(html_element(node, ".prob .home") %>% html_text()),
-      game_date = trimws(html_element(node, ".event-time .gt-timestamp") %>% html_text()),
-      sport = trimws(html_element(node, ".sport .sport-emoji") %>% html_attr("alt"))
-    )
-  }) %>%
-  bind_rows()
-
-# --- 2b. Parse "Finished" ---
-finished_nodes <- webpage_inactive %>% 
-  html_elements("#earlier-container a.event-link")
-
-finished_games <- finished_nodes %>%
-  lapply(function(node) {
-    team_1_is_winner <- !is.na(html_element(node, ".team .away.winner"))
-    team_2_is_winner <- !is.na(html_element(node, ".team .home.winner"))
-    
-    data.frame(
-      status = "Finished",
-      team_1 = trimws(html_element(node, ".team .away") %>% html_text()),
-      team_2 = trimws(html_element(node, ".team .home") %>% html_text()),
-      team_1_prob = if_else(team_1_is_winner, "100%", if_else(team_2_is_winner, "0%", NA_character_)),
-      team_2_prob = if_else(team_2_is_winner, "100%", if_else(team_1_is_winner, "0%", NA_character_)),
-      game_date = trimws(html_element(node, ".event-time .gt-timestamp") %>% html_text()),
-      sport = trimws(html_element(node, ".sport .sport-emoji") %>% html_attr("alt"))
-    )
-  }) %>%
-  bind_rows()
+tryCatch({
+  response_inactive <- GET(url_inactive, user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"))
+  webpage_inactive <- read_html(response_inactive)
+  
+  # --- 2a. Parse "Starting Later" ---
+  starting_later_nodes <- webpage_inactive %>% 
+    html_elements("#later-container a.event-link")
+  
+  starting_later_games <- starting_later_nodes %>%
+    lapply(function(node) {
+      data.frame(
+        status = "Starting Later",
+        team_1 = trimws(html_element(node, ".team .away") %>% html_text()),
+        team_2 = trimws(html_element(node, ".team .home") %>% html_text()),
+        team_1_prob = trimws(html_element(node, ".prob .away") %>% html_text()),
+        team_2_prob = trimws(html_element(node, ".prob .home") %>% html_text()),
+        game_date = trimws(html_element(node, ".event-time .gt-timestamp") %>% html_text()),
+        sport = trimws(html_element(node, ".sport .sport-emoji") %>% html_attr("alt"))
+      )
+    }) %>%
+    bind_rows()
+  
+  # --- 2b. Parse "Finished" ---
+  finished_nodes <- webpage_inactive %>% 
+    html_elements("#earlier-container a.event-link")
+  
+  finished_games <- finished_nodes %>%
+    lapply(function(node) {
+      team_1_is_winner <- !is.na(html_element(node, ".team .away.winner"))
+      team_2_is_winner <- !is.na(html_element(node, ".team .home.winner"))
+      
+      data.frame(
+        status = "Finished",
+        team_1 = trimws(html_element(node, ".team .away") %>% html_text()),
+        team_2 = trimws(html_element(node, ".team .home") %>% html_text()),
+        team_1_prob = if_else(team_1_is_winner, "100%", if_else(team_2_is_winner, "0%", NA_character_)),
+        team_2_prob = if_else(team_2_is_winner, "100%", if_else(team_1_is_winner, "0%", NA_character_)),
+        game_date = trimws(html_element(node, ".event-time .gt-timestamp") %>% html_text()),
+        sport = trimws(html_element(node, ".sport .sport-emoji") %>% html_attr("alt"))
+      )
+    }) %>%
+    bind_rows()
+}, error = function(e) {
+  starting_later_games <- data.frame()
+  finished_games <- data.frame()
+})
 
 # --- 3. Combine all data ---
 all_games <- bind_rows(live_games, starting_later_games, finished_games)
+
+# Store raw scraped data for diagnostics BEFORE any processing
+gambletron_raw_scrape <- all_games
 
 # --- 4. Define "today" ---
 m <- sub("^0", "", format(Sys.Date(), "%m")) 
@@ -369,305 +375,161 @@ d <- sub("^0", "", format(Sys.Date(), "%d"))
 today_date <- paste(m, d, sep="/")
 
 # --- 5. Filter for NBA and Today ---
-# IMPORTANT: For "Live" games, game_date is NA, so we include those
-# For "Starting Later", we filter by today's date
 nba_today <- all_games %>%
   filter(
+    !is.na(sport),
     sport == "NBA",
     (status == "Live" | status == "Finished" | game_date == today_date)
   )
 
-# Store counts for debugging
-game_counts_debug <- list(
-  total_games = nrow(all_games),
-  nba_games = sum(all_games$sport == "NBA", na.rm = TRUE),
-  live_games = sum(all_games$status == "Live" & all_games$sport == "NBA", na.rm = TRUE),
-  starting_later = sum(all_games$status == "Starting Later" & all_games$sport == "NBA", na.rm = TRUE),
-  finished_games = sum(all_games$status == "Finished" & all_games$sport == "NBA", na.rm = TRUE),
-  nba_today_count = nrow(nba_today),
-  today_date_filter = today_date
-)
-
-# Store raw scraped data for diagnostics
-gambletron_diagnostics <- nba_today %>%
-  mutate(scrape_timestamp = Sys.time())
-
 # --- 6. Process and Join Scraped Data ---
-live_data_standardized <- data.frame()  # Initialize for diagnostics
-live_data_for_diagnostics <- data.frame()  # Initialize for diagnostics
-live_data_final <- data.frame()  # Initialize for diagnostics
-
 if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
   # Convert probabilities from "XX%" string to numeric
   convert_prob_to_num <- function(prob_str) {
-    as.numeric(str_remove(prob_str, "%")) / 100.0
+    if (is.na(prob_str) || prob_str == "") return(NA_real_)
+    num_val <- as.numeric(str_remove(prob_str, "%")) / 100.0
+    # Validate probability is in reasonable range
+    if (is.na(num_val) || num_val < 0 || num_val > 1) return(NA_real_)
+    return(num_val)
   }
   
-  # IMPROVED: Create game-pair data first to ensure probabilities are complementary
-  nba_today_processed <- nba_today %>%
+  # Process each game as a pair to maintain complementary probabilities
+  nba_today_with_ids <- nba_today %>%
     mutate(
+      game_pair_id = row_number(),
       prob_1_num = convert_prob_to_num(team_1_prob),
-      prob_2_num = convert_prob_to_num(team_2_prob),
-      # Validate that probabilities sum to approximately 1.0
-      prob_sum = prob_1_num + prob_2_num,
-      prob_valid = abs(prob_sum - 1.0) < 0.05,  # Allow 5% tolerance
-      # Create a unique game identifier
-      game_pair_id = paste0("gp_", row_number())
+      prob_2_num = convert_prob_to_num(team_2_prob)
     )
   
-  # Reshape data to one row per team, keeping game_pair_id
-  live_data_team1 <- nba_today_processed %>%
-    select(Team = team_1, live_win_prob = prob_1_num, game_pair_id, prob_valid, status)
-  
-  live_data_team2 <- nba_today_processed %>%
-    select(Team = team_2, live_win_prob = prob_2_num, game_pair_id, prob_valid, status)
-    
-  live_data_combined <- bind_rows(live_data_team1, live_data_team2) %>%
-    mutate(Team = trimws(Team))
-  
-  # Standardize team names
-  live_data_standardized <- live_data_combined %>%
+  # Validate and normalize probabilities for each game
+  nba_today_normalized <- nba_today_with_ids %>%
     mutate(
-      Team_Original = Team,  # Keep original for diagnostics
-      Team = case_when(
-        # Portland Trail Blazers
-        str_detect(Team, regex("\\bBlazers?\\b", ignore_case = TRUE)) ~ "Portland Trail Blazers",
-        str_detect(Team, regex("\\bPortland\\b", ignore_case = TRUE)) ~ "Portland Trail Blazers",
-        str_detect(Team, regex("\\bTrail\\s*Blazers?\\b", ignore_case = TRUE)) ~ "Portland Trail Blazers",
-        
-        # Philadelphia 76ers
-        str_detect(Team, regex("\\b76ers?\\b", ignore_case = TRUE)) ~ "Philadelphia 76ers",
-        str_detect(Team, regex("\\bPhiladelphia\\b", ignore_case = TRUE)) ~ "Philadelphia 76ers",
-        str_detect(Team, regex("\\bPhilly\\b", ignore_case = TRUE)) ~ "Philadelphia 76ers",
-        str_detect(Team, regex("\\bSixers?\\b", ignore_case = TRUE)) ~ "Philadelphia 76ers",
-        
-        # Detroit Pistons
-        str_detect(Team, regex("\\bPistons?\\b", ignore_case = TRUE)) ~ "Detroit Pistons",
-        str_detect(Team, regex("\\bDetroit\\b", ignore_case = TRUE)) ~ "Detroit Pistons",
-        
-        # Miami Heat
-        str_detect(Team, regex("\\bHeat\\b", ignore_case = TRUE)) ~ "Miami Heat",
-        str_detect(Team, regex("\\bMiami\\b", ignore_case = TRUE)) ~ "Miami Heat",
-        
-        # Boston Celtics
-        str_detect(Team, regex("\\bCeltics?\\b", ignore_case = TRUE)) ~ "Boston Celtics",
-        str_detect(Team, regex("\\bBoston\\b", ignore_case = TRUE)) ~ "Boston Celtics",
-        
-        # Brooklyn Nets (MUST come before checking for just "Nets")
-        str_detect(Team, regex("\\bBrooklyn\\b", ignore_case = TRUE)) ~ "Brooklyn Nets",
-        str_detect(Team, regex("\\bBrooklyn\\s+Nets?\\b", ignore_case = TRUE)) ~ "Brooklyn Nets",
-        str_detect(Team, regex("\\bNets?\\b", ignore_case = TRUE)) & !str_detect(Team, regex("\\bHornets?\\b", ignore_case = TRUE)) ~ "Brooklyn Nets",
-        
-        # New York Knicks
-        str_detect(Team, regex("\\bKnicks?\\b", ignore_case = TRUE)) ~ "New York Knicks",
-        str_detect(Team, regex("\\bNew\\s+York\\b", ignore_case = TRUE)) & !str_detect(Team, regex("\\bPelicans?\\b", ignore_case = TRUE)) ~ "New York Knicks",
-        str_detect(Team, regex("\\bNY\\b(?!\\s*Pelicans?)", ignore_case = TRUE)) ~ "New York Knicks",
-        
-        # Toronto Raptors
-        str_detect(Team, regex("\\bRaptors?\\b", ignore_case = TRUE)) ~ "Toronto Raptors",
-        str_detect(Team, regex("\\bToronto\\b", ignore_case = TRUE)) ~ "Toronto Raptors",
-        
-        # Chicago Bulls
-        str_detect(Team, regex("\\bBulls?\\b", ignore_case = TRUE)) ~ "Chicago Bulls",
-        str_detect(Team, regex("\\bChicago\\b", ignore_case = TRUE)) ~ "Chicago Bulls",
-        
-        # Cleveland Cavaliers
-        str_detect(Team, regex("\\bCavaliers?\\b", ignore_case = TRUE)) ~ "Cleveland Cavaliers",
-        str_detect(Team, regex("\\bCleveland\\b", ignore_case = TRUE)) ~ "Cleveland Cavaliers",
-        str_detect(Team, regex("\\bCavs?\\b", ignore_case = TRUE)) ~ "Cleveland Cavaliers",
-        
-        # Indiana Pacers
-        str_detect(Team, regex("\\bPacers?\\b", ignore_case = TRUE)) ~ "Indiana Pacers",
-        str_detect(Team, regex("\\bIndiana\\b", ignore_case = TRUE)) ~ "Indiana Pacers",
-        
-        # Milwaukee Bucks
-        str_detect(Team, regex("\\bBucks?\\b", ignore_case = TRUE)) ~ "Milwaukee Bucks",
-        str_detect(Team, regex("\\bMilwaukee\\b", ignore_case = TRUE)) ~ "Milwaukee Bucks",
-        
-        # Atlanta Hawks
-        str_detect(Team, regex("\\bHawks?\\b", ignore_case = TRUE)) ~ "Atlanta Hawks",
-        str_detect(Team, regex("\\bAtlanta\\b", ignore_case = TRUE)) ~ "Atlanta Hawks",
-        
-        # Charlotte Hornets
-        str_detect(Team, regex("\\bHornets?\\b", ignore_case = TRUE)) ~ "Charlotte Hornets",
-        str_detect(Team, regex("\\bCharlotte\\b", ignore_case = TRUE)) ~ "Charlotte Hornets",
-        
-        # Orlando Magic
-        str_detect(Team, regex("\\bMagic\\b", ignore_case = TRUE)) ~ "Orlando Magic",
-        str_detect(Team, regex("\\bOrlando\\b", ignore_case = TRUE)) ~ "Orlando Magic",
-        
-        # Washington Wizards
-        str_detect(Team, regex("\\bWizards?\\b", ignore_case = TRUE)) ~ "Washington Wizards",
-        str_detect(Team, regex("\\bWashington\\b", ignore_case = TRUE)) ~ "Washington Wizards",
-        
-        # Denver Nuggets
-        str_detect(Team, regex("\\bNuggets?\\b", ignore_case = TRUE)) ~ "Denver Nuggets",
-        str_detect(Team, regex("\\bDenver\\b", ignore_case = TRUE)) ~ "Denver Nuggets",
-        
-        # Minnesota Timberwolves
-        str_detect(Team, regex("\\bTimberwolves?\\b", ignore_case = TRUE)) ~ "Minnesota Timberwolves",
-        str_detect(Team, regex("\\bMinnesota\\b", ignore_case = TRUE)) ~ "Minnesota Timberwolves",
-        str_detect(Team, regex("\\bT-?Wolves?\\b", ignore_case = TRUE)) ~ "Minnesota Timberwolves",
-        
-        # Oklahoma City Thunder
-        str_detect(Team, regex("\\bThunder\\b", ignore_case = TRUE)) ~ "Oklahoma City Thunder",
-        str_detect(Team, regex("\\bOklahoma\\s*City\\b", ignore_case = TRUE)) ~ "Oklahoma City Thunder",
-        str_detect(Team, regex("\\bOKC\\b", ignore_case = TRUE)) ~ "Oklahoma City Thunder",
-        
-        # Utah Jazz
-        str_detect(Team, regex("\\bJazz\\b", ignore_case = TRUE)) ~ "Utah Jazz",
-        str_detect(Team, regex("\\bUtah\\b", ignore_case = TRUE)) ~ "Utah Jazz",
-        
-        # Golden State Warriors
-        str_detect(Team, regex("\\bWarriors?\\b", ignore_case = TRUE)) ~ "Golden State Warriors",
-        str_detect(Team, regex("\\bGolden\\s*State\\b", ignore_case = TRUE)) ~ "Golden State Warriors",
-        str_detect(Team, regex("\\bGS\\b(?!W)", ignore_case = TRUE)) ~ "Golden State Warriors",
-        
-        # Los Angeles Clippers
-        str_detect(Team, regex("\\bClippers?\\b", ignore_case = TRUE)) ~ "Los Angeles Clippers",
-        str_detect(Team, regex("\\bLA\\s*Clippers?\\b", ignore_case = TRUE)) ~ "Los Angeles Clippers",
-        str_detect(Team, regex("\\bL\\.?A\\.?\\s*Clippers?\\b", ignore_case = TRUE)) ~ "Los Angeles Clippers",
-        
-        # Los Angeles Lakers
-        str_detect(Team, regex("\\bLakers?\\b", ignore_case = TRUE)) ~ "Los Angeles Lakers",
-        str_detect(Team, regex("\\bLA\\s*Lakers?\\b", ignore_case = TRUE)) ~ "Los Angeles Lakers",
-        str_detect(Team, regex("\\bL\\.?A\\.?\\s*Lakers?\\b", ignore_case = TRUE)) ~ "Los Angeles Lakers",
-        
-        # Phoenix Suns
-        str_detect(Team, regex("\\bSuns?\\b", ignore_case = TRUE)) ~ "Phoenix Suns",
-        str_detect(Team, regex("\\bPhoenix\\b", ignore_case = TRUE)) ~ "Phoenix Suns",
-        
-        # Sacramento Kings
-        str_detect(Team, regex("\\bKings?\\b", ignore_case = TRUE)) ~ "Sacramento Kings",
-        str_detect(Team, regex("\\bSacramento\\b", ignore_case = TRUE)) ~ "Sacramento Kings",
-        
-        # Dallas Mavericks
-        str_detect(Team, regex("\\bMavericks?\\b", ignore_case = TRUE)) ~ "Dallas Mavericks",
-        str_detect(Team, regex("\\bDallas\\b", ignore_case = TRUE)) ~ "Dallas Mavericks",
-        str_detect(Team, regex("\\bMavs?\\b", ignore_case = TRUE)) ~ "Dallas Mavericks",
-        
-        # Houston Rockets
-        str_detect(Team, regex("\\bRockets?\\b", ignore_case = TRUE)) ~ "Houston Rockets",
-        str_detect(Team, regex("\\bHouston\\b", ignore_case = TRUE)) ~ "Houston Rockets",
-        
-        # Memphis Grizzlies
-        str_detect(Team, regex("\\bGrizzlies?\\b", ignore_case = TRUE)) ~ "Memphis Grizzlies",
-        str_detect(Team, regex("\\bMemphis\\b", ignore_case = TRUE)) ~ "Memphis Grizzlies",
-        
-        # New Orleans Pelicans
-        str_detect(Team, regex("\\bPelicans?\\b", ignore_case = TRUE)) ~ "New Orleans Pelicans",
-        str_detect(Team, regex("\\bNew\\s*Orleans\\b", ignore_case = TRUE)) ~ "New Orleans Pelicans",
-        str_detect(Team, regex("\\bNO\\b(?!\\s*Lakers?)", ignore_case = TRUE)) ~ "New Orleans Pelicans",
-        
-        # San Antonio Spurs
-        str_detect(Team, regex("\\bSpurs?\\b", ignore_case = TRUE)) ~ "San Antonio Spurs",
-        str_detect(Team, regex("\\bSan\\s*Antonio\\b", ignore_case = TRUE)) ~ "San Antonio Spurs",
-        
-        TRUE ~ Team
+      prob_sum = prob_1_num + prob_2_num,
+      # Only normalize if both probabilities exist and sum is reasonable (0.8 to 1.2)
+      needs_normalization = !is.na(prob_1_num) & !is.na(prob_2_num) & 
+                            prob_sum > 0.8 & prob_sum < 1.2 & 
+                            abs(prob_sum - 1.0) > 0.02,
+      prob_1_normalized = case_when(
+        is.na(prob_1_num) ~ NA_real_,
+        needs_normalization ~ prob_1_num / prob_sum,
+        TRUE ~ prob_1_num
+      ),
+      prob_2_normalized = case_when(
+        is.na(prob_2_num) ~ NA_real_,
+        needs_normalization ~ prob_2_num / prob_sum,
+        TRUE ~ prob_2_num
       )
     )
   
-  # CRITICAL FIX: Ensure complementary probabilities within each game
-  # For each game_pair_id, verify both teams have complementary probabilities
-  live_data_final <- live_data_standardized %>%
-    group_by(game_pair_id) %>%
+  # Store processing log for diagnostics
+  gambletron_processing_log <- nba_today_normalized %>%
+    select(game_pair_id, team_1, team_2, team_1_prob, team_2_prob, 
+           prob_1_num, prob_2_num, prob_1_normalized, prob_2_normalized, status)
+  
+  # Create one row per team with standardized names
+  live_data_team1 <- nba_today_normalized %>%
+    select(Team = team_1, live_win_prob = prob_1_normalized, game_pair_id, status)
+  
+  live_data_team2 <- nba_today_normalized %>%
+    select(Team = team_2, live_win_prob = prob_2_normalized, game_pair_id, status)
+  
+  live_data_combined <- bind_rows(live_data_team1, live_data_team2) %>%
+    mutate(Team = trimws(Team)) %>%
+    filter(!is.na(Team), Team != "")
+  
+  # Standardize team names
+  standardize_team_name <- function(team_name) {
+    team_upper <- str_to_upper(team_name)
+    
+    # Check against all teams in draft_data
+    for (i in 1:nrow(draft_data)) {
+      keys <- str_split(draft_data$Matchup_Key[i], "\\|")[[1]]
+      for (key in keys) {
+        key_upper <- str_to_upper(key)
+        # Use word boundaries for matching
+        pattern <- paste0("\\b", key_upper, "\\b")
+        if (str_detect(team_upper, regex(pattern))) {
+          return(draft_data$Team[i])
+        }
+      }
+      
+      # Also try matching against the full team name
+      if (str_detect(team_upper, str_to_upper(draft_data$Team[i]))) {
+        return(draft_data$Team[i])
+      }
+      
+      # Try matching against abbreviation
+      if (team_upper == draft_data$abbr[i]) {
+        return(draft_data$Team[i])
+      }
+    }
+    
+    # If no match found, return original
+    return(team_name)
+  }
+  
+  live_data_standardized <- live_data_combined %>%
     mutate(
-      # If probabilities don't sum to 1, normalize them
-      needs_normalization = !first(prob_valid),
-      normalized_prob = if_else(needs_normalization, 
-                                 live_win_prob / sum(live_win_prob, na.rm = TRUE),
-                                 live_win_prob)
-    ) %>%
-    ungroup() %>%
-    select(Team, live_win_prob = normalized_prob, game_pair_id, status, Team_Original) %>%
-    # IMPROVED: Handle duplicates by keeping the most relevant entry
-    # Priority: Live > Starting Later > Finished
-    # Within same status, keep first occurrence
-    arrange(
-      Team,
-      case_when(
+      Team_Original = Team,
+      Team = sapply(Team, standardize_team_name)
+    )
+  
+  # For each standardized team, keep the most reliable probability
+  # Prioritize: Live > Starting Later > Finished
+  live_data_final <- live_data_standardized %>%
+    mutate(
+      status_priority = case_when(
         status == "Live" ~ 1,
         status == "Starting Later" ~ 2,
         status == "Finished" ~ 3,
         TRUE ~ 4
       )
     ) %>%
+    arrange(Team, status_priority) %>%
     group_by(Team) %>%
-    slice(1) %>%  # Keep only first occurrence per team after sorting
+    filter(!is.na(live_win_prob)) %>%
+    slice(1) %>%
     ungroup() %>%
     select(Team, live_win_prob)
   
-  # Store for diagnostics BEFORE removing Team_Original
-  live_data_for_diagnostics <- live_data_standardized %>%
-    select(Team_Original, Team, live_win_prob, game_pair_id, status)
-
-  # Join with todays_picks and calculate Live Expected Skins
+  # Join with todays_picks
   todays_picks <- todays_picks %>%
     left_join(live_data_final, by = "Team") %>%
     mutate(
       Live_Expected_Skins = case_when(
-        is.na(live_win_prob) ~ Live_Expected_Skins,
+        is.na(live_win_prob) ~ `Expected Skins`,  # CHANGED: Default to Expected Skins if no live data
         Pick == "W" ~ live_win_prob,
         Pick == "L" ~ 1 - live_win_prob,
-        TRUE ~ Live_Expected_Skins
+        TRUE ~ `Expected Skins`
       )
     ) %>%
     select(-live_win_prob)
   
-  # CRITICAL FIX: Fill in missing Live_Expected_Skins using complementary probabilities
-  # If one team in a game has Live_Expected_Skins but the other doesn't, calculate from complement
+  # ADDITIONAL FIX: For teams in the same game, ensure consistent probabilities
+  # This helps when one team's probability was scraped but the other wasn't
   todays_picks <- todays_picks %>%
     group_by(game_id) %>%
     mutate(
-      # Count how many teams in this game have live data
-      teams_with_live = sum(!is.na(Live_Expected_Skins)),
-      # If exactly one team has live data, we can fill in the other
-      can_fill_from_opponent = teams_with_live == 1 & n() == 2
+      n_teams_in_game = n(),
+      n_with_live_data = sum(Live_Expected_Skins != `Expected Skins`),
+      # If only one team has live data but there are 2 teams, copy to the other
+      should_share = n_teams_in_game == 2 & n_with_live_data == 1
     ) %>%
-    ungroup()
-  
-  # For games where we can fill from opponent
-  if (any(todays_picks$can_fill_from_opponent, na.rm = TRUE)) {
-    todays_picks <- todays_picks %>%
-      group_by(game_id) %>%
-      mutate(
-        # Get the non-NA Live_Expected_Skins value in this game (if any)
-        opponent_live_skins = first(na.omit(Live_Expected_Skins)),
-        # Fill NA values with complementary probability
-        Live_Expected_Skins = if_else(
-          can_fill_from_opponent & is.na(Live_Expected_Skins),
-          opponent_live_skins,  # Use same value since they're complementary bets
-          Live_Expected_Skins
-        )
-      ) %>%
-      ungroup() %>%
-      select(-opponent_live_skins)
-  }
-  
-  # Clean up helper columns
-  todays_picks <- todays_picks %>%
-    select(-teams_with_live, -can_fill_from_opponent)
-  
-  # ENHANCED FIX: For same player with opposite picks in same game, ensure equal expected skins
-  # This handles the case where Thomas has both Denver (W) and Sacramento (L)
-  todays_picks <- todays_picks %>%
-    group_by(game_id) %>%
     mutate(
-      # If all teams in game have live data, average them to ensure consistency
-      all_have_live = all(!is.na(Live_Expected_Skins)) & n() >= 2,
-      avg_live_expected = if_else(all_have_live, mean(Live_Expected_Skins, na.rm = TRUE), NA_real_),
-      Live_Expected_Skins = if_else(all_have_live & !is.na(avg_live_expected),
-                                     avg_live_expected,
-                                     Live_Expected_Skins)
+      Live_Expected_Skins = if_else(
+        should_share & Live_Expected_Skins == `Expected Skins`,
+        first(Live_Expected_Skins[Live_Expected_Skins != `Expected Skins`]),
+        Live_Expected_Skins
+      )
     ) %>%
     ungroup() %>%
-    select(-all_have_live, -avg_live_expected)
+    select(-n_teams_in_game, -n_with_live_data, -should_share)
 }
 
 # Ensure Live_Expected_Skins column exists even if scraping was skipped
 if (!"Live_Expected_Skins" %in% names(todays_picks)) {
   todays_picks <- todays_picks %>%
-    mutate(Live_Expected_Skins = NA_real_)
+    mutate(Live_Expected_Skins = `Expected Skins`)
 }
 ```
 
@@ -909,7 +771,7 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
       `Perfect Skins %`
     )
   
-  # Add TOTAL row
+  # Add TOTAL row - FIXED: Use NA_real_ for Perfect Skins % to match numeric type
   total_row <- data.frame(
     Player = "TOTAL",
     `Total Expected Skins` = sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE),
@@ -918,7 +780,7 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
     `Skins Luck` = sum(todays_results_with_cumulative$Skins_Luck, na.rm = TRUE),
     `Live Skins Luck` = sprintf("%.1f", sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE) - 
                          sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE)),
-    `Perfect Skins %` = NA_real_,
+    `Perfect Skins %` = NA_real_,  # FIXED: Use NA_real_ to match numeric type
     check.names = FALSE,
     stringsAsFactors = FALSE
   )
@@ -1996,217 +1858,95 @@ print(p2)
 #| warning: false
 #| results: 'asis'
 
-cat("\n### System & Timing Diagnostics\n\n")
+cat("\n### Gambletron Scraping Diagnostics\n\n")
 
-if (exists("time_debug_info")) {
-  cat("**Time and Timezone Information:**\n\n")
-  cat(paste0("- System Time: ", format(time_debug_info$system_time, "%Y-%m-%d %H:%M:%S %Z"), "\n"))
-  cat(paste0("- System Timezone: ", time_debug_info$system_timezone, "\n"))
-  cat(paste0("- Chicago Time: ", format(time_debug_info$chicago_time, "%Y-%m-%d %H:%M:%S %Z"), "\n"))
-  cat(paste0("- Chicago Hour: ", time_debug_info$chicago_hour, "\n"))
-  cat(paste0("- Use CSV for Sportsline: ", use_csv_for_sportsline, "\n"))
-  if (exists("csv_was_used") && csv_was_used) {
-    cat(paste0("- **CSV WAS USED**: ", csv_file_used, "\n"))
-  } else {
-    cat("- **CSV NOT USED** - Fresh Sportsline scrape performed\n")
-  }
-  cat("\n\n")
-}
-
-if (exists("game_counts_debug")) {
-  cat("**Gambletron Game Counts:**\n\n")
-  cat(paste0("- Total games scraped: ", game_counts_debug$total_games, "\n"))
-  cat(paste0("- NBA games: ", game_counts_debug$nba_games, "\n"))
-  cat(paste0("- Live games: ", game_counts_debug$live_games, "\n"))
-  cat(paste0("- Starting Later games: ", game_counts_debug$starting_later, "\n"))
-  cat(paste0("- Finished games: ", game_counts_debug$finished_games, "\n"))
-  cat(paste0("- **Games after date filter (nba_today): ", game_counts_debug$nba_today_count, "**\n"))
-  cat(paste0("- Today date filter used: ", game_counts_debug$today_date_filter, "\n"))
-  cat("\n\n")
-}
-
-cat("\n### Gambletron Scrape Diagnostics\n\n")
-
-cat(paste0("**Current date filter (today_date): ", today_date, "**\n\n"))
-cat(paste0("**Current skins_date: ", skins_date, "**\n\n"))
-
-if (exists("gambletron_diagnostics") && nrow(gambletron_diagnostics) > 0) {
-  cat("**Raw scraped data from Gambletron:**\n\n")
-  cat(paste0("Total games scraped: ", nrow(gambletron_diagnostics), "\n\n"))
+if (exists("gambletron_raw_scrape") && nrow(gambletron_raw_scrape) > 0) {
+  cat("**Raw scraped data from Gambletron (before any processing):**\n\n")
   
-  # Show ALL games, not just first 10
-  diagnostic_table <- gambletron_diagnostics %>%
-    select(status, team_1, team_2, team_1_prob, team_2_prob, game_date)
+  diagnostic_raw <- gambletron_raw_scrape %>%
+    filter(!is.na(sport), sport == "NBA") %>%
+    select(status, team_1, team_2, team_1_prob, team_2_prob, game_date) %>%
+    head(15)
   
-  print(knitr::kable(diagnostic_table, format = "html") %>%
-    kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
-  
-  cat("\n\n")
-  
-  # Check for any games with "Denver" or "Sacramento" or "Nuggets" or "Kings"
-  den_sac_games <- gambletron_diagnostics %>%
-    filter(
-      str_detect(team_1, regex("Denver|Nuggets|Sacramento|Kings", ignore_case = TRUE)) |
-      str_detect(team_2, regex("Denver|Nuggets|Sacramento|Kings", ignore_case = TRUE))
-    )
-  
-  if (nrow(den_sac_games) > 0) {
-    cat("**Games involving Denver/Nuggets or Sacramento/Kings:**\n\n")
-    print(knitr::kable(
-      den_sac_games %>% select(status, team_1, team_2, team_1_prob, team_2_prob, game_date),
-      format = "html"
-    ) %>%
+  if (nrow(diagnostic_raw) > 0) {
+    print(knitr::kable(diagnostic_raw, format = "html") %>%
       kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
-    cat("\n\n")
   } else {
-    cat("**WARNING: No games found with Denver/Nuggets or Sacramento/Kings in scraped data!**\n\n")
+    cat("No NBA games found in raw scrape.\n")
   }
+  
+  cat("\n\n")
+} else {
+  cat("No raw scrape data available.\n\n")
 }
 
-cat("**Thomas's picks and calculated Live Expected Skins:**\n\n")
+if (exists("gambletron_processing_log") && nrow(gambletron_processing_log) > 0) {
+  cat("**Processing log (probability conversion and normalization):**\n\n")
+  
+  processing_summary <- gambletron_processing_log %>%
+    select(game_pair_id, team_1, team_2, 
+           raw_prob_1 = team_1_prob, raw_prob_2 = team_2_prob,
+           num_prob_1 = prob_1_num, num_prob_2 = prob_2_num,
+           final_prob_1 = prob_1_normalized, final_prob_2 = prob_2_normalized,
+           status) %>%
+    head(15)
+  
+  print(knitr::kable(processing_summary, digits = 3, format = "html") %>%
+    kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE, font_size = 11))
+  
+  cat("\n\n")
+}
+
+cat("**Current picks with Expected vs Live Expected Skins:**\n\n")
 
 if (exists("todays_picks") && nrow(todays_picks) > 0) {
-  thomas_picks <- todays_picks %>%
-    filter(Player == "Thomas") %>%
-    select(Team, Pick, `Expected Skins`, Live_Expected_Skins, game_id) %>%
-    arrange(game_id)
+  picks_diagnostic <- todays_picks %>%
+    select(Player, Team, Pick, `Expected Skins`, Live_Expected_Skins, Abbr) %>%
+    mutate(
+      Difference = Live_Expected_Skins - `Expected Skins`,
+      Has_Live_Data = abs(Difference) > 0.01
+    ) %>%
+    arrange(Player, desc(abs(Difference)))
   
-  if (nrow(thomas_picks) > 0) {
-    print(knitr::kable(thomas_picks, digits = 3, format = "html") %>%
+  print(knitr::kable(picks_diagnostic, digits = 3, format = "html") %>%
+    kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
+  
+  cat("\n\n**Key Observations:**\n")
+  cat("- Teams with 'Has_Live_Data = TRUE' successfully got live probabilities from Gambletron\n")
+  cat("- Teams with 'Has_Live_Data = FALSE' are using Expected Skins as fallback\n")
+  cat("- Large differences (>0.2) may indicate odds have moved significantly\n\n")
+  
+  # Specific check for Matt and Kenneth
+  cat("**Specific checks for Matt and Kenneth (Thunder, Magic):**\n\n")
+  
+  matt_kenneth_teams <- picks_diagnostic %>%
+    filter(Player %in% c("Matt", "Kenneth"), Team %in% c("Oklahoma City Thunder", "Orlando Magic"))
+  
+  if (nrow(matt_kenneth_teams) > 0) {
+    print(knitr::kable(matt_kenneth_teams, digits = 3, format = "html") %>%
       kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
     
-    cat("\n\n**Analysis:**\n")
-    cat("- If Thomas has both teams in same game with opposite picks (W and L), ")
-    cat("both Live_Expected_Skins values should be equal (complementary probabilities).\n")
-    cat("- After the fix, missing values should be filled from opponent's probability.\n\n")
+    cat("\n")
     
-    # Check for same-game opposite picks
-    thomas_same_game <- thomas_picks %>%
-      group_by(game_id) %>%
-      filter(n() == 2) %>%
-      summarise(
-        teams = paste(Team, collapse = " vs "),
-        picks = paste(Pick, collapse = " and "),
-        expected_skins = paste(round(`Expected Skins`, 3), collapse = " and "),
-        live_skins = paste(ifelse(is.na(Live_Expected_Skins), "NA", as.character(round(Live_Expected_Skins, 3))), collapse = " and "),
-        are_equal = ifelse(all(!is.na(Live_Expected_Skins)), abs(diff(Live_Expected_Skins)) < 0.01, NA),
-        .groups = 'drop'
-      )
-    
-    if (nrow(thomas_same_game) > 0) {
-      cat("**Games where Thomas has both teams:**\n\n")
-      print(knitr::kable(thomas_same_game, format = "html") %>%
-        kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
-      cat("\n\n")
+    # Check what was scraped for these teams
+    if (exists("gambletron_processing_log") && nrow(gambletron_processing_log) > 0) {
+      thunder_magic_scrape <- gambletron_processing_log %>%
+        filter(str_detect(team_1, regex("Thunder|Magic", ignore_case = TRUE)) | 
+               str_detect(team_2, regex("Thunder|Magic", ignore_case = TRUE)))
       
-      # Add interpretation
-      if (any(!thomas_same_game$are_equal, na.rm = TRUE)) {
-        cat("**⚠️ WARNING: Live_Expected_Skins values are NOT equal for teams in same game!**\n")
-        cat("This indicates either:\n")
-        cat("1. One team didn't get matched in Gambletron scrape (team name issue)\n")
-        cat("2. Data is from different times/sources\n")
-        cat("3. Date filtering is including wrong games\n\n")
+      if (nrow(thunder_magic_scrape) > 0) {
+        cat("\n**What Gambletron returned for Thunder/Magic games:**\n\n")
+        print(knitr::kable(thunder_magic_scrape, digits = 3, format = "html") %>%
+          kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
+      } else {
+        cat("\nNo Thunder or Magic games found in Gambletron scrape - this is the problem!\n")
       }
     }
   } else {
-    cat("Thomas has no picks today.\n")
+    cat("Matt and Kenneth's Thunder/Magic picks not found in today's picks.\n")
   }
+  
 } else {
   cat("No picks data available.\n")
-}
-
-# Add summary of what happened
-cat("\n\n### Summary of Data Processing\n\n")
-cat(paste0("1. **Sportsline Data Source**: ", ifelse(exists("csv_was_used") && csv_was_used, "CSV file (blackout window)", "Fresh scrape"), "\n"))
-cat(paste0("2. **Gambletron Games Scraped**: ", ifelse(exists("game_counts_debug"), game_counts_debug$nba_today_count, "Unknown"), "\n"))
-cat(paste0("3. **Teams Matched**: ", ifelse(exists("live_data_final"), nrow(live_data_final), 0), "\n"))
-cat(paste0("4. **Thomas's Picks Today**: ", ifelse(exists("thomas_picks"), nrow(thomas_picks), 0), "\n"))
-if (exists("thomas_picks") && nrow(thomas_picks) > 0) {
-  missing_live <- sum(is.na(thomas_picks$Live_Expected_Skins))
-  cat(paste0("5. **Thomas's Picks Missing Live Data**: ", missing_live, "\n"))
-  if (missing_live > 0) {
-    cat("\n**⚠️ PROBLEM IDENTIFIED**: Some of Thomas's picks are missing Live_Expected_Skins values.\n")
-    cat("Check the team matching diagnostics above to see which teams didn't match.\n")
-  }
-}
-
-cat("\n\n**Team Name Matching Debug:**\n\n")
-
-if (exists("live_data_for_diagnostics") && nrow(live_data_for_diagnostics) > 0) {
-  cat("**All team entries after standardization (BEFORE deduplication):**\n\n")
-  
-  # Show all Denver/Sacramento entries
-  den_sac_entries <- live_data_for_diagnostics %>%
-    filter(str_detect(Team_Original, regex("Denver|Nuggets|Sacramento|Kings", ignore_case = TRUE)) |
-           str_detect(Team, regex("Denver|Nuggets|Sacramento|Kings", ignore_case = TRUE)))
-  
-  if (nrow(den_sac_entries) > 0) {
-    cat(paste0("Found ", nrow(den_sac_entries), " entries for Denver/Sacramento:\n\n"))
-    print(knitr::kable(
-      den_sac_entries %>%
-        select(Team_Original, Team, live_win_prob, game_pair_id, status) %>%
-        arrange(Team, status),
-      format = "html",
-      digits = 3
-    ) %>%
-      kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
-    cat("\n\n")
-  } else {
-    cat("**WARNING: No Denver/Sacramento teams found in standardized data!**\n\n")
-  }
-  
-  # Check for duplicate teams
-  duplicate_teams <- live_data_for_diagnostics %>%
-    group_by(Team) %>%
-    filter(n() > 1) %>%
-    ungroup() %>%
-    arrange(Team, status)
-  
-  if (nrow(duplicate_teams) > 0) {
-    cat("**WARNING: Duplicate team entries detected (multiple games?):**\n\n")
-    print(knitr::kable(
-      duplicate_teams %>%
-        select(Team_Original, Team, live_win_prob, game_pair_id, status),
-      format = "html",
-      digits = 3
-    ) %>%
-      kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
-    cat("\n\n")
-  }
-} else if (exists("live_data_standardized") && nrow(live_data_standardized) > 0) {
-  cat("Teams after standardization (showing original and standardized names):\n\n")
-  
-  matching_debug <- live_data_standardized %>%
-    select(Team_Original, Team, live_win_prob) %>%
-    filter(str_detect(Team_Original, regex("Denver|Nuggets|Sacramento|Kings", ignore_case = TRUE)) |
-           str_detect(Team, regex("Denver|Nuggets|Sacramento|Kings", ignore_case = TRUE)))
-  
-  if (nrow(matching_debug) > 0) {
-    print(knitr::kable(matching_debug, format = "html") %>%
-      kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
-  } else {
-    cat("No Denver/Sacramento teams found in standardized data.\n")
-  }
-} else {
-  cat("No standardized team data available.\n")
-}
-
-# Show what actually got joined to todays_picks
-if (exists("live_data_final") && nrow(live_data_final) > 0) {
-  cat("\n\n**Final data that will be joined to todays_picks:**\n\n")
-  
-  den_sac_final <- live_data_final %>%
-    filter(str_detect(Team, regex("Denver|Nuggets|Sacramento|Kings", ignore_case = TRUE)))
-  
-  if (nrow(den_sac_final) > 0) {
-    print(knitr::kable(
-      den_sac_final,
-      format = "html",
-      digits = 3
-    ) %>%
-      kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
-  } else {
-    cat("No Denver/Sacramento in final data!\n")
-  }
 }
 ```
