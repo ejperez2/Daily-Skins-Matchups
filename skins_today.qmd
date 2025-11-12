@@ -45,9 +45,19 @@ cat(paste0("<p style='font-size:14px; color:#999;'><strong>Last updated:</strong
 
 # --- Part 0: Define Time and Data Source ---
 
-# Get current time in Chicago
+# CRITICAL: Get current time in multiple formats for debugging
+system_time <- Sys.time()
+system_tz <- Sys.timezone()
 current_time_ct <- now(tzone = "America/Chicago")
 current_hour_ct <- hour(current_time_ct)
+
+# Store for diagnostics
+time_debug_info <- list(
+  system_time = system_time,
+  system_timezone = system_tz,
+  chicago_time = current_time_ct,
+  chicago_hour = current_hour_ct
+)
 
 # Define the "skins date" based on the 2 AM cutoff.
 # A "day" runs from 2:00 AM to 1:59 AM the next morning.
@@ -102,6 +112,9 @@ draft_data <- tribble(
 )
 
 # --- Part 1: Get Data (Conditional) ---
+csv_was_used <- FALSE
+csv_file_used <- NA_character_
+
 if (use_csv_for_sportsline) {
   file_path <- file.path(history_dir, paste0(skins_date, ".csv"))
   
@@ -114,10 +127,15 @@ if (use_csv_for_sportsline) {
           "Expected Skins" = Expected_Skins,
           Moneyline = NA_real_,
           "Implied Prob" = NA_real_,
+          # CRITICAL: Always reset Live_Expected_Skins to NA - never trust CSV values
+          # We will recalculate from fresh Gambletron scrape
           Live_Expected_Skins = NA_real_
         ) %>%
         select(Date, Team, Pick, "Expected Skins", Player, Moneyline, "Implied Prob", Abbr, game_id, Won_Game, Actual_Skins, Skins_Luck, Live_Expected_Skins) %>%
         arrange(desc(`Expected Skins`))
+      
+      csv_was_used <- TRUE
+      csv_file_used <- file_path
         
     } else {
       use_csv_for_sportsline <- FALSE
@@ -351,17 +369,34 @@ d <- sub("^0", "", format(Sys.Date(), "%d"))
 today_date <- paste(m, d, sep="/")
 
 # --- 5. Filter for NBA and Today ---
+# IMPORTANT: For "Live" games, game_date is NA, so we include those
+# For "Starting Later", we filter by today's date
 nba_today <- all_games %>%
   filter(
     sport == "NBA",
-    (status == "Live" | game_date == today_date)
+    (status == "Live" | status == "Finished" | game_date == today_date)
   )
+
+# Store counts for debugging
+game_counts_debug <- list(
+  total_games = nrow(all_games),
+  nba_games = sum(all_games$sport == "NBA", na.rm = TRUE),
+  live_games = sum(all_games$status == "Live" & all_games$sport == "NBA", na.rm = TRUE),
+  starting_later = sum(all_games$status == "Starting Later" & all_games$sport == "NBA", na.rm = TRUE),
+  finished_games = sum(all_games$status == "Finished" & all_games$sport == "NBA", na.rm = TRUE),
+  nba_today_count = nrow(nba_today),
+  today_date_filter = today_date
+)
 
 # Store raw scraped data for diagnostics
 gambletron_diagnostics <- nba_today %>%
   mutate(scrape_timestamp = Sys.time())
 
 # --- 6. Process and Join Scraped Data ---
+live_data_standardized <- data.frame()  # Initialize for diagnostics
+live_data_for_diagnostics <- data.frame()  # Initialize for diagnostics
+live_data_final <- data.frame()  # Initialize for diagnostics
+
 if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
   # Convert probabilities from "XX%" string to numeric
   convert_prob_to_num <- function(prob_str) {
@@ -544,12 +579,27 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
                                  live_win_prob)
     ) %>%
     ungroup() %>%
-    select(Team, live_win_prob = normalized_prob, game_pair_id) %>%
-    # Remove duplicates after standardization, keeping first occurrence
+    select(Team, live_win_prob = normalized_prob, game_pair_id, status, Team_Original) %>%
+    # IMPROVED: Handle duplicates by keeping the most relevant entry
+    # Priority: Live > Starting Later > Finished
+    # Within same status, keep first occurrence
+    arrange(
+      Team,
+      case_when(
+        status == "Live" ~ 1,
+        status == "Starting Later" ~ 2,
+        status == "Finished" ~ 3,
+        TRUE ~ 4
+      )
+    ) %>%
     group_by(Team) %>%
-    slice(1) %>%
+    slice(1) %>%  # Keep only first occurrence per team after sorting
     ungroup() %>%
     select(Team, live_win_prob)
+  
+  # Store for diagnostics BEFORE removing Team_Original
+  live_data_for_diagnostics <- live_data_standardized %>%
+    select(Team_Original, Team, live_win_prob, game_pair_id, status)
 
   # Join with todays_picks and calculate Live Expected Skins
   todays_picks <- todays_picks %>%
@@ -564,28 +614,54 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
     ) %>%
     select(-live_win_prob)
   
+  # CRITICAL FIX: Fill in missing Live_Expected_Skins using complementary probabilities
+  # If one team in a game has Live_Expected_Skins but the other doesn't, calculate from complement
+  todays_picks <- todays_picks %>%
+    group_by(game_id) %>%
+    mutate(
+      # Count how many teams in this game have live data
+      teams_with_live = sum(!is.na(Live_Expected_Skins)),
+      # If exactly one team has live data, we can fill in the other
+      can_fill_from_opponent = teams_with_live == 1 & n() == 2
+    ) %>%
+    ungroup()
+  
+  # For games where we can fill from opponent
+  if (any(todays_picks$can_fill_from_opponent, na.rm = TRUE)) {
+    todays_picks <- todays_picks %>%
+      group_by(game_id) %>%
+      mutate(
+        # Get the non-NA Live_Expected_Skins value in this game (if any)
+        opponent_live_skins = first(na.omit(Live_Expected_Skins)),
+        # Fill NA values with complementary probability
+        Live_Expected_Skins = if_else(
+          can_fill_from_opponent & is.na(Live_Expected_Skins),
+          opponent_live_skins,  # Use same value since they're complementary bets
+          Live_Expected_Skins
+        )
+      ) %>%
+      ungroup() %>%
+      select(-opponent_live_skins)
+  }
+  
+  # Clean up helper columns
+  todays_picks <- todays_picks %>%
+    select(-teams_with_live, -can_fill_from_opponent)
+  
   # ENHANCED FIX: For same player with opposite picks in same game, ensure equal expected skins
   # This handles the case where Thomas has both Denver (W) and Sacramento (L)
   todays_picks <- todays_picks %>%
-    group_by(game_id, Player) %>%
-    mutate(
-      # Check if this player has both teams in this game with opposite picks
-      player_has_both_sides = n() == 2 & n_distinct(Pick) == 2,
-      both_have_live_data = sum(!is.na(Live_Expected_Skins)) == 2
-    ) %>%
-    ungroup() %>%
     group_by(game_id) %>%
     mutate(
-      # For any player with both sides, use the average (which should be the same if probabilities are complementary)
-      # If not the same, this averaging will ensure they're equal
-      needs_correction = any(player_has_both_sides & both_have_live_data),
-      avg_live_expected = if_else(needs_correction, mean(Live_Expected_Skins, na.rm = TRUE), NA_real_),
-      Live_Expected_Skins = if_else(needs_correction & !is.na(avg_live_expected),
+      # If all teams in game have live data, average them to ensure consistency
+      all_have_live = all(!is.na(Live_Expected_Skins)) & n() >= 2,
+      avg_live_expected = if_else(all_have_live, mean(Live_Expected_Skins, na.rm = TRUE), NA_real_),
+      Live_Expected_Skins = if_else(all_have_live & !is.na(avg_live_expected),
                                      avg_live_expected,
                                      Live_Expected_Skins)
     ) %>%
     ungroup() %>%
-    select(-player_has_both_sides, -both_have_live_data, -needs_correction, -avg_live_expected)
+    select(-all_have_live, -avg_live_expected)
 }
 
 # Ensure Live_Expected_Skins column exists even if scraping was skipped
@@ -1920,19 +1996,71 @@ print(p2)
 #| warning: false
 #| results: 'asis'
 
+cat("\n### System & Timing Diagnostics\n\n")
+
+if (exists("time_debug_info")) {
+  cat("**Time and Timezone Information:**\n\n")
+  cat(paste0("- System Time: ", format(time_debug_info$system_time, "%Y-%m-%d %H:%M:%S %Z"), "\n"))
+  cat(paste0("- System Timezone: ", time_debug_info$system_timezone, "\n"))
+  cat(paste0("- Chicago Time: ", format(time_debug_info$chicago_time, "%Y-%m-%d %H:%M:%S %Z"), "\n"))
+  cat(paste0("- Chicago Hour: ", time_debug_info$chicago_hour, "\n"))
+  cat(paste0("- Use CSV for Sportsline: ", use_csv_for_sportsline, "\n"))
+  if (exists("csv_was_used") && csv_was_used) {
+    cat(paste0("- **CSV WAS USED**: ", csv_file_used, "\n"))
+  } else {
+    cat("- **CSV NOT USED** - Fresh Sportsline scrape performed\n")
+  }
+  cat("\n\n")
+}
+
+if (exists("game_counts_debug")) {
+  cat("**Gambletron Game Counts:**\n\n")
+  cat(paste0("- Total games scraped: ", game_counts_debug$total_games, "\n"))
+  cat(paste0("- NBA games: ", game_counts_debug$nba_games, "\n"))
+  cat(paste0("- Live games: ", game_counts_debug$live_games, "\n"))
+  cat(paste0("- Starting Later games: ", game_counts_debug$starting_later, "\n"))
+  cat(paste0("- Finished games: ", game_counts_debug$finished_games, "\n"))
+  cat(paste0("- **Games after date filter (nba_today): ", game_counts_debug$nba_today_count, "**\n"))
+  cat(paste0("- Today date filter used: ", game_counts_debug$today_date_filter, "\n"))
+  cat("\n\n")
+}
+
 cat("\n### Gambletron Scrape Diagnostics\n\n")
+
+cat(paste0("**Current date filter (today_date): ", today_date, "**\n\n"))
+cat(paste0("**Current skins_date: ", skins_date, "**\n\n"))
 
 if (exists("gambletron_diagnostics") && nrow(gambletron_diagnostics) > 0) {
   cat("**Raw scraped data from Gambletron:**\n\n")
+  cat(paste0("Total games scraped: ", nrow(gambletron_diagnostics), "\n\n"))
   
+  # Show ALL games, not just first 10
   diagnostic_table <- gambletron_diagnostics %>%
-    select(status, team_1, team_2, team_1_prob, team_2_prob, game_date) %>%
-    head(10)  # Show first 10 games
+    select(status, team_1, team_2, team_1_prob, team_2_prob, game_date)
   
   print(knitr::kable(diagnostic_table, format = "html") %>%
     kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
   
   cat("\n\n")
+  
+  # Check for any games with "Denver" or "Sacramento" or "Nuggets" or "Kings"
+  den_sac_games <- gambletron_diagnostics %>%
+    filter(
+      str_detect(team_1, regex("Denver|Nuggets|Sacramento|Kings", ignore_case = TRUE)) |
+      str_detect(team_2, regex("Denver|Nuggets|Sacramento|Kings", ignore_case = TRUE))
+    )
+  
+  if (nrow(den_sac_games) > 0) {
+    cat("**Games involving Denver/Nuggets or Sacramento/Kings:**\n\n")
+    print(knitr::kable(
+      den_sac_games %>% select(status, team_1, team_2, team_1_prob, team_2_prob, game_date),
+      format = "html"
+    ) %>%
+      kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
+    cat("\n\n")
+  } else {
+    cat("**WARNING: No games found with Denver/Nuggets or Sacramento/Kings in scraped data!**\n\n")
+  }
 }
 
 cat("**Thomas's picks and calculated Live Expected Skins:**\n\n")
@@ -1950,7 +2078,7 @@ if (exists("todays_picks") && nrow(todays_picks) > 0) {
     cat("\n\n**Analysis:**\n")
     cat("- If Thomas has both teams in same game with opposite picks (W and L), ")
     cat("both Live_Expected_Skins values should be equal (complementary probabilities).\n")
-    cat("- If they're different, there may be a team name matching issue or scraping problem.\n\n")
+    cat("- After the fix, missing values should be filled from opponent's probability.\n\n")
     
     # Check for same-game opposite picks
     thomas_same_game <- thomas_picks %>%
@@ -1959,8 +2087,9 @@ if (exists("todays_picks") && nrow(todays_picks) > 0) {
       summarise(
         teams = paste(Team, collapse = " vs "),
         picks = paste(Pick, collapse = " and "),
-        live_skins = paste(round(Live_Expected_Skins, 3), collapse = " and "),
-        are_equal = abs(diff(Live_Expected_Skins)) < 0.01,
+        expected_skins = paste(round(`Expected Skins`, 3), collapse = " and "),
+        live_skins = paste(ifelse(is.na(Live_Expected_Skins), "NA", as.character(round(Live_Expected_Skins, 3))), collapse = " and "),
+        are_equal = ifelse(all(!is.na(Live_Expected_Skins)), abs(diff(Live_Expected_Skins)) < 0.01, NA),
         .groups = 'drop'
       )
     
@@ -1968,11 +2097,116 @@ if (exists("todays_picks") && nrow(todays_picks) > 0) {
       cat("**Games where Thomas has both teams:**\n\n")
       print(knitr::kable(thomas_same_game, format = "html") %>%
         kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
+      cat("\n\n")
+      
+      # Add interpretation
+      if (any(!thomas_same_game$are_equal, na.rm = TRUE)) {
+        cat("**⚠️ WARNING: Live_Expected_Skins values are NOT equal for teams in same game!**\n")
+        cat("This indicates either:\n")
+        cat("1. One team didn't get matched in Gambletron scrape (team name issue)\n")
+        cat("2. Data is from different times/sources\n")
+        cat("3. Date filtering is including wrong games\n\n")
+      }
     }
   } else {
     cat("Thomas has no picks today.\n")
   }
 } else {
   cat("No picks data available.\n")
+}
+
+# Add summary of what happened
+cat("\n\n### Summary of Data Processing\n\n")
+cat(paste0("1. **Sportsline Data Source**: ", ifelse(exists("csv_was_used") && csv_was_used, "CSV file (blackout window)", "Fresh scrape"), "\n"))
+cat(paste0("2. **Gambletron Games Scraped**: ", ifelse(exists("game_counts_debug"), game_counts_debug$nba_today_count, "Unknown"), "\n"))
+cat(paste0("3. **Teams Matched**: ", ifelse(exists("live_data_final"), nrow(live_data_final), 0), "\n"))
+cat(paste0("4. **Thomas's Picks Today**: ", ifelse(exists("thomas_picks"), nrow(thomas_picks), 0), "\n"))
+if (exists("thomas_picks") && nrow(thomas_picks) > 0) {
+  missing_live <- sum(is.na(thomas_picks$Live_Expected_Skins))
+  cat(paste0("5. **Thomas's Picks Missing Live Data**: ", missing_live, "\n"))
+  if (missing_live > 0) {
+    cat("\n**⚠️ PROBLEM IDENTIFIED**: Some of Thomas's picks are missing Live_Expected_Skins values.\n")
+    cat("Check the team matching diagnostics above to see which teams didn't match.\n")
+  }
+}
+
+cat("\n\n**Team Name Matching Debug:**\n\n")
+
+if (exists("live_data_for_diagnostics") && nrow(live_data_for_diagnostics) > 0) {
+  cat("**All team entries after standardization (BEFORE deduplication):**\n\n")
+  
+  # Show all Denver/Sacramento entries
+  den_sac_entries <- live_data_for_diagnostics %>%
+    filter(str_detect(Team_Original, regex("Denver|Nuggets|Sacramento|Kings", ignore_case = TRUE)) |
+           str_detect(Team, regex("Denver|Nuggets|Sacramento|Kings", ignore_case = TRUE)))
+  
+  if (nrow(den_sac_entries) > 0) {
+    cat(paste0("Found ", nrow(den_sac_entries), " entries for Denver/Sacramento:\n\n"))
+    print(knitr::kable(
+      den_sac_entries %>%
+        select(Team_Original, Team, live_win_prob, game_pair_id, status) %>%
+        arrange(Team, status),
+      format = "html",
+      digits = 3
+    ) %>%
+      kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
+    cat("\n\n")
+  } else {
+    cat("**WARNING: No Denver/Sacramento teams found in standardized data!**\n\n")
+  }
+  
+  # Check for duplicate teams
+  duplicate_teams <- live_data_for_diagnostics %>%
+    group_by(Team) %>%
+    filter(n() > 1) %>%
+    ungroup() %>%
+    arrange(Team, status)
+  
+  if (nrow(duplicate_teams) > 0) {
+    cat("**WARNING: Duplicate team entries detected (multiple games?):**\n\n")
+    print(knitr::kable(
+      duplicate_teams %>%
+        select(Team_Original, Team, live_win_prob, game_pair_id, status),
+      format = "html",
+      digits = 3
+    ) %>%
+      kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
+    cat("\n\n")
+  }
+} else if (exists("live_data_standardized") && nrow(live_data_standardized) > 0) {
+  cat("Teams after standardization (showing original and standardized names):\n\n")
+  
+  matching_debug <- live_data_standardized %>%
+    select(Team_Original, Team, live_win_prob) %>%
+    filter(str_detect(Team_Original, regex("Denver|Nuggets|Sacramento|Kings", ignore_case = TRUE)) |
+           str_detect(Team, regex("Denver|Nuggets|Sacramento|Kings", ignore_case = TRUE)))
+  
+  if (nrow(matching_debug) > 0) {
+    print(knitr::kable(matching_debug, format = "html") %>%
+      kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
+  } else {
+    cat("No Denver/Sacramento teams found in standardized data.\n")
+  }
+} else {
+  cat("No standardized team data available.\n")
+}
+
+# Show what actually got joined to todays_picks
+if (exists("live_data_final") && nrow(live_data_final) > 0) {
+  cat("\n\n**Final data that will be joined to todays_picks:**\n\n")
+  
+  den_sac_final <- live_data_final %>%
+    filter(str_detect(Team, regex("Denver|Nuggets|Sacramento|Kings", ignore_case = TRUE)))
+  
+  if (nrow(den_sac_final) > 0) {
+    print(knitr::kable(
+      den_sac_final,
+      format = "html",
+      digits = 3
+    ) %>%
+      kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
+  } else {
+    cat("No Denver/Sacramento in final data!\n")
+  }
 }
 ```
