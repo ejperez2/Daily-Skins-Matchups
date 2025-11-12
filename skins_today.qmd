@@ -1,5 +1,6 @@
 ---
 title: "Today's Skins"
+# VERSION: 2024-11-12-v2 (Fixed vectorization + type mismatch)
 format:
   html:
     self-contained: true
@@ -384,13 +385,12 @@ nba_today <- all_games %>%
 
 # --- 6. Process and Join Scraped Data ---
 if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
-  # Convert probabilities from "XX%" string to numeric
+  # Convert probabilities from "XX%" string to numeric (vectorized)
   convert_prob_to_num <- function(prob_str) {
-    if (is.na(prob_str) || prob_str == "") return(NA_real_)
+    # Handle vector input
     num_val <- as.numeric(str_remove(prob_str, "%")) / 100.0
-    # Validate probability is in reasonable range
-    if (is.na(num_val) || num_val < 0 || num_val > 1) return(NA_real_)
-    return(num_val)
+    # Return NA for invalid probabilities, otherwise return the numeric value
+    ifelse(is.na(num_val) | num_val < 0 | num_val > 1, NA_real_, num_val)
   }
   
   # Process each game as a pair to maintain complementary probabilities
