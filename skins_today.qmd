@@ -1,6 +1,6 @@
 ---
 title: "Today's Skins"
-# VERSION: 2024-11-12-v2 (Fixed vectorization + type mismatch)
+# VERSION: 2024-11-12-v3 (Removed diagnostics, reordered columns, fixed totals, added time ordering)
 format:
   html:
     self-contained: true
@@ -115,9 +115,10 @@ if (use_csv_for_sportsline) {
           "Expected Skins" = Expected_Skins,
           Moneyline = NA_real_,
           "Implied Prob" = NA_real_,
-          Live_Expected_Skins = NA_real_
+          Live_Expected_Skins = NA_real_,
+          game_time_ct = as.POSIXct(NA)
         ) %>%
-        select(Date, Team, Pick, "Expected Skins", Player, Moneyline, "Implied Prob", Abbr, game_id, Won_Game, Actual_Skins, Skins_Luck, Live_Expected_Skins) %>%
+        select(Date, Team, Pick, "Expected Skins", Player, Moneyline, "Implied Prob", Abbr, game_id, Won_Game, Actual_Skins, Skins_Luck, Live_Expected_Skins, game_time_ct) %>%
         arrange(desc(`Expected Skins`))
         
     } else {
@@ -233,7 +234,7 @@ if (!use_csv_for_sportsline) {
     ) %>%
     select(Date, Team, Pick = skins_pick, "Expected Skins" = expected_skins,
            Player = player, Moneyline = moneyline, "Implied Prob" = prob_no_vig,
-           Abbr = abbr, game_id, Won_Game, Actual_Skins, Skins_Luck, Live_Expected_Skins) %>%
+           Abbr = abbr, game_id, Won_Game, Actual_Skins, Skins_Luck, Live_Expected_Skins, game_time_ct) %>%
     arrange(desc(`Expected Skins`))
 }
 
@@ -259,10 +260,6 @@ if (nrow(todays_picks) > 0) {
 
 # This chunk scrapes live win probabilities from gambletron
 # and joins them with our 'todays_picks' data.
-
-# Initialize diagnostic data frames
-gambletron_raw_scrape <- data.frame()
-gambletron_processing_log <- data.frame()
 
 # Always scrape live data regardless of blackout window
 # --- Define URLs ---
@@ -367,9 +364,6 @@ tryCatch({
 # --- 3. Combine all data ---
 all_games <- bind_rows(live_games, starting_later_games, finished_games)
 
-# Store raw scraped data for diagnostics BEFORE any processing
-gambletron_raw_scrape <- all_games
-
 # --- 4. Define "today" ---
 m <- sub("^0", "", format(Sys.Date(), "%m")) 
 d <- sub("^0", "", format(Sys.Date(), "%d")) 
@@ -420,11 +414,6 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
         TRUE ~ prob_2_num
       )
     )
-  
-  # Store processing log for diagnostics
-  gambletron_processing_log <- nba_today_normalized %>%
-    select(game_pair_id, team_1, team_2, team_1_prob, team_2_prob, 
-           prob_1_num, prob_2_num, prob_1_normalized, prob_2_normalized, status)
   
   # Create one row per team with standardized names
   live_data_team1 <- nba_today_normalized %>%
@@ -729,15 +718,6 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
       `Live Skins Luck` = `Live Expected Skins` - `Total Expected Skins`
     ) %>%
     left_join(perfect_skins_calc, by = "Player") %>%
-    select(
-      Player, 
-      `Total Expected Skins`, 
-      `Live Expected Skins`,
-      `Total Actual Skins`, 
-      `Skins Luck`, 
-      `Live Skins Luck`,
-      `Perfect Skins %`
-    ) %>%
     arrange(desc(`Skins Luck`)) %>%
     mutate(
       # Apply color coding to Player column
@@ -763,24 +743,24 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
     ) %>%
     select(
       Player = Player_Display,
+      `Live Skins Luck` = `Live Skins Luck Display`,
       `Total Expected Skins`,
       `Live Expected Skins`,
       `Total Actual Skins`,
       `Skins Luck`,
-      `Live Skins Luck` = `Live Skins Luck Display`,
       `Perfect Skins %`
     )
   
-  # Add TOTAL row - FIXED: Use NA_real_ for Perfect Skins % to match numeric type
+  # Add TOTAL row - FIXED: Calculate sum of Perfect Skins % column
   total_row <- data.frame(
     Player = "TOTAL",
+    `Live Skins Luck` = sprintf("%.1f", sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE) - 
+                         sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE)),
     `Total Expected Skins` = sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE),
     `Live Expected Skins` = sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE),
     `Total Actual Skins` = sum(todays_results_with_cumulative$Actual_Skins, na.rm = TRUE),
     `Skins Luck` = sum(todays_results_with_cumulative$Skins_Luck, na.rm = TRUE),
-    `Live Skins Luck` = sprintf("%.1f", sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE) - 
-                         sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE)),
-    `Perfect Skins %` = NA_real_,  # FIXED: Use NA_real_ to match numeric type
+    `Perfect Skins %` = sum(perfect_skins_calc$`Perfect Skins %`, na.rm = TRUE),
     check.names = FALSE,
     stringsAsFactors = FALSE
   )
@@ -795,7 +775,7 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
     format = "html"
   ) %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(c(5, 6, 7), bold = TRUE) %>%
+    column_spec(c(2, 6, 7), bold = TRUE) %>%
     row_spec(nrow(final_player_summary_with_total), bold = TRUE, background = "#444444")
 }
 ```
@@ -965,6 +945,7 @@ if (nrow(todays_picks) > 0) {
       # IMPROVED: Get second non-NA live expected skins
       Live_Skin_Prob_2 = if(n() > 1) coalesce(nth(Cumulative_Live_Expected, 2), nth(`Expected Skins`, 2)) else NA,
       Status = first(Game_Status),
+      game_time_ct = first(game_time_ct),
       .groups = 'drop'
     ) %>%
     mutate(
@@ -978,9 +959,11 @@ if (nrow(todays_picks) > 0) {
         str_detect(Status, "Q1") ~ 6,
         str_detect(Status, "OT") ~ 2,  # Group OT with Q4
         TRUE ~ 7  # Not Started and other
-      )
+      ),
+      # For "Not Started" games, use game time for secondary sort
+      time_order = if_else(Status == "Not Started", as.numeric(game_time_ct), as.numeric(Sys.time()))
     ) %>%
-    arrange(status_order, game_id) %>%
+    arrange(status_order, time_order, game_id) %>%
     mutate(
       # Format player names with color highlighting
       Player_1_Display = case_when(
@@ -1441,12 +1424,12 @@ if (file.exists(yesterday_file)) {
           ) %>%
           arrange(desc(`Skins Luck`)) %>%
           mutate(
-            # Apply color coding to Player column
+            # Apply color coding to Player column - FIXED: exclude values between -0.1 and 0.1
             Player_Display = case_when(
-              `Skins Luck` > 0 ~ 
+              `Skins Luck` > 0.1 ~ 
                 cell_spec(Player, background = "#90EE90", color = "#000000 !important", 
                           bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-              `Skins Luck` < 0 ~ 
+              `Skins Luck` < -0.1 ~ 
                 cell_spec(Player, background = "#FFB6C6", color = "#000000 !important", 
                           bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
               TRUE ~ Player
@@ -1846,107 +1829,4 @@ p2 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Expected, color = Player, 
   scale_color_brewer(palette = "Set2")
 
 print(p2)
-```
-
----
-
-## Diagnostic Information
-
-```{r diagnostics}
-#| echo: false
-#| message: false
-#| warning: false
-#| results: 'asis'
-
-cat("\n### Gambletron Scraping Diagnostics\n\n")
-
-if (exists("gambletron_raw_scrape") && nrow(gambletron_raw_scrape) > 0) {
-  cat("**Raw scraped data from Gambletron (before any processing):**\n\n")
-  
-  diagnostic_raw <- gambletron_raw_scrape %>%
-    filter(!is.na(sport), sport == "NBA") %>%
-    select(status, team_1, team_2, team_1_prob, team_2_prob, game_date) %>%
-    head(15)
-  
-  if (nrow(diagnostic_raw) > 0) {
-    print(knitr::kable(diagnostic_raw, format = "html") %>%
-      kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
-  } else {
-    cat("No NBA games found in raw scrape.\n")
-  }
-  
-  cat("\n\n")
-} else {
-  cat("No raw scrape data available.\n\n")
-}
-
-if (exists("gambletron_processing_log") && nrow(gambletron_processing_log) > 0) {
-  cat("**Processing log (probability conversion and normalization):**\n\n")
-  
-  processing_summary <- gambletron_processing_log %>%
-    select(game_pair_id, team_1, team_2, 
-           raw_prob_1 = team_1_prob, raw_prob_2 = team_2_prob,
-           num_prob_1 = prob_1_num, num_prob_2 = prob_2_num,
-           final_prob_1 = prob_1_normalized, final_prob_2 = prob_2_normalized,
-           status) %>%
-    head(15)
-  
-  print(knitr::kable(processing_summary, digits = 3, format = "html") %>%
-    kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE, font_size = 11))
-  
-  cat("\n\n")
-}
-
-cat("**Current picks with Expected vs Live Expected Skins:**\n\n")
-
-if (exists("todays_picks") && nrow(todays_picks) > 0) {
-  picks_diagnostic <- todays_picks %>%
-    select(Player, Team, Pick, `Expected Skins`, Live_Expected_Skins, Abbr) %>%
-    mutate(
-      Difference = Live_Expected_Skins - `Expected Skins`,
-      Has_Live_Data = abs(Difference) > 0.01
-    ) %>%
-    arrange(Player, desc(abs(Difference)))
-  
-  print(knitr::kable(picks_diagnostic, digits = 3, format = "html") %>%
-    kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
-  
-  cat("\n\n**Key Observations:**\n")
-  cat("- Teams with 'Has_Live_Data = TRUE' successfully got live probabilities from Gambletron\n")
-  cat("- Teams with 'Has_Live_Data = FALSE' are using Expected Skins as fallback\n")
-  cat("- Large differences (>0.2) may indicate odds have moved significantly\n\n")
-  
-  # Specific check for Matt and Kenneth
-  cat("**Specific checks for Matt and Kenneth (Thunder, Magic):**\n\n")
-  
-  matt_kenneth_teams <- picks_diagnostic %>%
-    filter(Player %in% c("Matt", "Kenneth"), Team %in% c("Oklahoma City Thunder", "Orlando Magic"))
-  
-  if (nrow(matt_kenneth_teams) > 0) {
-    print(knitr::kable(matt_kenneth_teams, digits = 3, format = "html") %>%
-      kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
-    
-    cat("\n")
-    
-    # Check what was scraped for these teams
-    if (exists("gambletron_processing_log") && nrow(gambletron_processing_log) > 0) {
-      thunder_magic_scrape <- gambletron_processing_log %>%
-        filter(str_detect(team_1, regex("Thunder|Magic", ignore_case = TRUE)) | 
-               str_detect(team_2, regex("Thunder|Magic", ignore_case = TRUE)))
-      
-      if (nrow(thunder_magic_scrape) > 0) {
-        cat("\n**What Gambletron returned for Thunder/Magic games:**\n\n")
-        print(knitr::kable(thunder_magic_scrape, digits = 3, format = "html") %>%
-          kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
-      } else {
-        cat("\nNo Thunder or Magic games found in Gambletron scrape - this is the problem!\n")
-      }
-    }
-  } else {
-    cat("Matt and Kenneth's Thunder/Magic picks not found in today's picks.\n")
-  }
-  
-} else {
-  cat("No picks data available.\n")
-}
 ```
