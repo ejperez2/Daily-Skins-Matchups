@@ -259,6 +259,9 @@ if (nrow(todays_picks) > 0) {
 # This chunk scrapes live win probabilities from gambletron
 # and joins them with our 'todays_picks' data.
 
+# Initialize diagnostic data frame
+gambletron_diagnostics <- data.frame()
+
 # Always scrape live data regardless of blackout window
 # --- Define URLs ---
 url_live <- "https://www.gambletron2000.com/live?sport=nba&team="
@@ -354,6 +357,10 @@ nba_today <- all_games %>%
     (status == "Live" | game_date == today_date)
   )
 
+# Store raw scraped data for diagnostics
+gambletron_diagnostics <- nba_today %>%
+  mutate(scrape_timestamp = Sys.time())
+
 # --- 6. Process and Join Scraped Data ---
 if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
   # Convert probabilities from "XX%" string to numeric
@@ -361,20 +368,32 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
     as.numeric(str_remove(prob_str, "%")) / 100.0
   }
   
-  # Reshape data to one row per team
-  live_data_team1 <- nba_today %>%
-    select(Team = team_1, live_win_prob = team_1_prob)
+  # IMPROVED: Create game-pair data first to ensure probabilities are complementary
+  nba_today_processed <- nba_today %>%
+    mutate(
+      prob_1_num = convert_prob_to_num(team_1_prob),
+      prob_2_num = convert_prob_to_num(team_2_prob),
+      # Validate that probabilities sum to approximately 1.0
+      prob_sum = prob_1_num + prob_2_num,
+      prob_valid = abs(prob_sum - 1.0) < 0.05,  # Allow 5% tolerance
+      # Create a unique game identifier
+      game_pair_id = paste0("gp_", row_number())
+    )
   
-  live_data_team2 <- nba_today %>%
-    select(Team = team_2, live_win_prob = team_2_prob)
+  # Reshape data to one row per team, keeping game_pair_id
+  live_data_team1 <- nba_today_processed %>%
+    select(Team = team_1, live_win_prob = prob_1_num, game_pair_id, prob_valid, status)
+  
+  live_data_team2 <- nba_today_processed %>%
+    select(Team = team_2, live_win_prob = prob_2_num, game_pair_id, prob_valid, status)
     
-  live_data_final <- bind_rows(live_data_team1, live_data_team2) %>%
+  live_data_combined <- bind_rows(live_data_team1, live_data_team2) %>%
+    mutate(Team = trimws(Team))
+  
+  # Standardize team names
+  live_data_standardized <- live_data_combined %>%
     mutate(
-      Team = trimws(Team),
-      live_win_prob = convert_prob_to_num(live_win_prob)
-    ) %>%
-    mutate(
-      # ENHANCED: More robust team name matching with multiple patterns
+      Team_Original = Team,  # Keep original for diagnostics
       Team = case_when(
         # Portland Trail Blazers
         str_detect(Team, regex("\\bBlazers?\\b", ignore_case = TRUE)) ~ "Portland Trail Blazers",
@@ -511,10 +530,26 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
         
         TRUE ~ Team
       )
+    )
+  
+  # CRITICAL FIX: Ensure complementary probabilities within each game
+  # For each game_pair_id, verify both teams have complementary probabilities
+  live_data_final <- live_data_standardized %>%
+    group_by(game_pair_id) %>%
+    mutate(
+      # If probabilities don't sum to 1, normalize them
+      needs_normalization = !first(prob_valid),
+      normalized_prob = if_else(needs_normalization, 
+                                 live_win_prob / sum(live_win_prob, na.rm = TRUE),
+                                 live_win_prob)
     ) %>%
-    # Remove duplicates after standardization
+    ungroup() %>%
+    select(Team, live_win_prob = normalized_prob, game_pair_id) %>%
+    # Remove duplicates after standardization, keeping first occurrence
     group_by(Team) %>%
-    summarise(live_win_prob = first(na.omit(live_win_prob)), .groups = 'drop')
+    slice(1) %>%
+    ungroup() %>%
+    select(Team, live_win_prob)
 
   # Join with todays_picks and calculate Live Expected Skins
   todays_picks <- todays_picks %>%
@@ -529,22 +564,28 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
     ) %>%
     select(-live_win_prob)
   
-  # Fix: For teams in the same game with opposite picks, ensure equal Live Expected Skins
-  # When one team has W pick with prob p and the other has L pick with prob (1-p),
-  # both should have the same expected skins. Use the higher value to correct scraping errors.
+  # ENHANCED FIX: For same player with opposite picks in same game, ensure equal expected skins
+  # This handles the case where Thomas has both Denver (W) and Sacramento (L)
   todays_picks <- todays_picks %>%
-    group_by(game_id) %>%
+    group_by(game_id, Player) %>%
     mutate(
-      # Check if we have 2 teams with opposite picks and both have live data
-      has_opposite_picks = n() == 2 & n_distinct(Pick) == 2 & sum(!is.na(Live_Expected_Skins)) == 2,
-      # Use the maximum value for both teams (assumes the higher is more accurate)
-      corrected_live = if_else(has_opposite_picks, 
-                                max(Live_Expected_Skins, na.rm = TRUE), 
-                                Live_Expected_Skins),
-      Live_Expected_Skins = corrected_live
+      # Check if this player has both teams in this game with opposite picks
+      player_has_both_sides = n() == 2 & n_distinct(Pick) == 2,
+      both_have_live_data = sum(!is.na(Live_Expected_Skins)) == 2
     ) %>%
     ungroup() %>%
-    select(-has_opposite_picks, -corrected_live)
+    group_by(game_id) %>%
+    mutate(
+      # For any player with both sides, use the average (which should be the same if probabilities are complementary)
+      # If not the same, this averaging will ensure they're equal
+      needs_correction = any(player_has_both_sides & both_have_live_data),
+      avg_live_expected = if_else(needs_correction, mean(Live_Expected_Skins, na.rm = TRUE), NA_real_),
+      Live_Expected_Skins = if_else(needs_correction & !is.na(avg_live_expected),
+                                     avg_live_expected,
+                                     Live_Expected_Skins)
+    ) %>%
+    ungroup() %>%
+    select(-player_has_both_sides, -both_have_live_data, -needs_correction, -avg_live_expected)
 }
 
 # Ensure Live_Expected_Skins column exists even if scraping was skipped
@@ -1867,4 +1908,71 @@ p2 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Expected, color = Player, 
   scale_color_brewer(palette = "Set2")
 
 print(p2)
+```
+
+---
+
+## Diagnostic Information
+
+```{r diagnostics}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: 'asis'
+
+cat("\n### Gambletron Scrape Diagnostics\n\n")
+
+if (exists("gambletron_diagnostics") && nrow(gambletron_diagnostics) > 0) {
+  cat("**Raw scraped data from Gambletron:**\n\n")
+  
+  diagnostic_table <- gambletron_diagnostics %>%
+    select(status, team_1, team_2, team_1_prob, team_2_prob, game_date) %>%
+    head(10)  # Show first 10 games
+  
+  print(knitr::kable(diagnostic_table, format = "html") %>%
+    kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
+  
+  cat("\n\n")
+}
+
+cat("**Thomas's picks and calculated Live Expected Skins:**\n\n")
+
+if (exists("todays_picks") && nrow(todays_picks) > 0) {
+  thomas_picks <- todays_picks %>%
+    filter(Player == "Thomas") %>%
+    select(Team, Pick, `Expected Skins`, Live_Expected_Skins, game_id) %>%
+    arrange(game_id)
+  
+  if (nrow(thomas_picks) > 0) {
+    print(knitr::kable(thomas_picks, digits = 3, format = "html") %>%
+      kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
+    
+    cat("\n\n**Analysis:**\n")
+    cat("- If Thomas has both teams in same game with opposite picks (W and L), ")
+    cat("both Live_Expected_Skins values should be equal (complementary probabilities).\n")
+    cat("- If they're different, there may be a team name matching issue or scraping problem.\n\n")
+    
+    # Check for same-game opposite picks
+    thomas_same_game <- thomas_picks %>%
+      group_by(game_id) %>%
+      filter(n() == 2) %>%
+      summarise(
+        teams = paste(Team, collapse = " vs "),
+        picks = paste(Pick, collapse = " and "),
+        live_skins = paste(round(Live_Expected_Skins, 3), collapse = " and "),
+        are_equal = abs(diff(Live_Expected_Skins)) < 0.01,
+        .groups = 'drop'
+      )
+    
+    if (nrow(thomas_same_game) > 0) {
+      cat("**Games where Thomas has both teams:**\n\n")
+      print(knitr::kable(thomas_same_game, format = "html") %>%
+        kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE))
+    }
+  } else {
+    cat("Thomas has no picks today.\n")
+  }
+} else {
+  cat("No picks data available.\n")
+}
 ```
