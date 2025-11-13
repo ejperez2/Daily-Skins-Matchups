@@ -662,7 +662,7 @@ if (nrow(todays_picks) > 0) {
 
 ---
 
-## Final Player Summary (Expected vs. Actual)
+## Daily Summary
 
 ```{r final_player_summary}
 #| echo: false
@@ -718,7 +718,7 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
       `Live Skins Luck` = `Live Expected Skins` - `Total Expected Skins`
     ) %>%
     left_join(perfect_skins_calc, by = "Player") %>%
-    arrange(desc(`Skins Luck`)) %>%
+    arrange(desc(`Total Expected Skins`)) %>%
     mutate(
       # Apply color coding to Player column
       Player_Display = case_when(
@@ -949,6 +949,23 @@ if (nrow(todays_picks) > 0) {
       .groups = 'drop'
     ) %>%
     mutate(
+      # Convert ET times in Status to CT for display
+      Status_CT = case_when(
+        # Check if Status contains ET time pattern (e.g., "7:00 PM ET")
+        str_detect(Status, "\\d{1,2}:\\d{2}\\s*[AP]M\\s+ET") ~ {
+          # Extract the time string
+          time_str <- str_extract(Status, "\\d{1,2}:\\d{2}\\s*[AP]M")
+          # Parse as ET time for today
+          et_time <- parse_date_time(paste(Sys.Date(), time_str), 
+                                     orders = "ymd I:M p", 
+                                     tz = "America/New_York")
+          # Convert to CT
+          ct_time <- with_tz(et_time, tzone = "America/Chicago")
+          # Format as time string with CT
+          paste(format(ct_time, "%I:%M %p CT"))
+        },
+        TRUE ~ Status
+      ),
       # Create sort order for status
       status_order = case_when(
         Status == "Final" ~ 1,
@@ -958,10 +975,14 @@ if (nrow(todays_picks) > 0) {
         str_detect(Status, "Q2") ~ 5,
         str_detect(Status, "Q1") ~ 6,
         str_detect(Status, "OT") ~ 2,  # Group OT with Q4
-        TRUE ~ 7  # Not Started and other
+        TRUE ~ 7  # Not Started and other (including upcoming games with times)
       ),
-      # For "Not Started" games, use game time for secondary sort
-      time_order = if_else(Status == "Not Started", as.numeric(game_time_ct), as.numeric(Sys.time()))
+      # For upcoming games (status_order 7), use game time for sorting (soonest first)
+      time_order = if_else(
+        status_order == 7 & !is.na(game_time_ct), 
+        as.numeric(game_time_ct), 
+        as.numeric(Sys.time())
+      )
     ) %>%
     arrange(status_order, time_order, game_id) %>%
     mutate(
@@ -1016,7 +1037,7 @@ if (nrow(todays_picks) > 0) {
       `Pick 2` = Pick_2_Display,
       `Won Skin 2` = Won_2,
       `Live Skin Prob 2` = Live_Prob_2_Display, 
-      Status
+      Status = Status_CT
     )
   
   # Create the table with HTML formatting enabled
