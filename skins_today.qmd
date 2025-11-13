@@ -1,6 +1,6 @@
 ---
 title: "Today's Skins"
-# VERSION: 2024-11-12-v3 (Removed diagnostics, reordered columns, fixed totals, added time ordering)
+# VERSION: 2024-11-12-v4 (Fixed gambletron finished games issue, added diagnostics)
 format:
   html:
     self-contained: true
@@ -261,6 +261,9 @@ if (nrow(todays_picks) > 0) {
 # This chunk scrapes live win probabilities from gambletron
 # and joins them with our 'todays_picks' data.
 
+# Initialize diagnostics list
+gambletron_diagnostics <- list()
+
 # Always scrape live data regardless of blackout window
 # --- Define URLs ---
 url_live <- "https://www.gambletron2000.com/live?sport=nba&team="
@@ -309,8 +312,12 @@ tryCatch({
       )
     }) %>%
     bind_rows()
+  
+  gambletron_diagnostics$live_games_count <- nrow(live_games)
+  gambletron_diagnostics$live_games_raw <- live_games
 }, error = function(e) {
   live_games <- data.frame()
+  gambletron_diagnostics$live_scrape_error <- as.character(e)
 })
 
 # --- 2. Scrape "Inactive" Games (Starting Later & Finished) ---
@@ -336,6 +343,9 @@ tryCatch({
     }) %>%
     bind_rows()
   
+  gambletron_diagnostics$starting_later_count <- nrow(starting_later_games)
+  gambletron_diagnostics$starting_later_raw <- starting_later_games
+  
   # --- 2b. Parse "Finished" ---
   finished_nodes <- webpage_inactive %>% 
     html_elements("#earlier-container a.event-link")
@@ -356,26 +366,39 @@ tryCatch({
       )
     }) %>%
     bind_rows()
+  
+  gambletron_diagnostics$finished_games_count <- nrow(finished_games)
+  gambletron_diagnostics$finished_games_raw <- finished_games
 }, error = function(e) {
   starting_later_games <- data.frame()
   finished_games <- data.frame()
+  gambletron_diagnostics$inactive_scrape_error <- as.character(e)
 })
 
 # --- 3. Combine all data ---
 all_games <- bind_rows(live_games, starting_later_games, finished_games)
 
 # --- 4. Define "today" ---
-m <- sub("^0", "", format(Sys.Date(), "%m")) 
-d <- sub("^0", "", format(Sys.Date(), "%d")) 
+m <- sub("^0", "", format(skins_date, "%m"))  # FIXED: Use skins_date instead of Sys.Date()
+d <- sub("^0", "", format(skins_date, "%d"))  # FIXED: Use skins_date instead of Sys.Date()
 today_date <- paste(m, d, sep="/")
 
+gambletron_diagnostics$today_date_string <- today_date
+gambletron_diagnostics$skins_date <- as.character(skins_date)
+
 # --- 5. Filter for NBA and Today ---
+# CRITICAL FIX: Only include finished games if they have today's date
 nba_today <- all_games %>%
   filter(
     !is.na(sport),
     sport == "NBA",
-    (status == "Live" | status == "Finished" | game_date == today_date)
+    (status == "Live" | 
+     (status == "Starting Later" & game_date == today_date) |
+     (status == "Finished" & game_date == today_date))  # FIXED: Only include finished games from today
   )
+
+gambletron_diagnostics$nba_today_count <- nrow(nba_today)
+gambletron_diagnostics$nba_today_data <- nba_today
 
 # --- 6. Process and Join Scraped Data ---
 if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
@@ -415,12 +438,27 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
       )
     )
   
-  # Create one row per team with standardized names
-  live_data_team1 <- nba_today_normalized %>%
-    select(Team = team_1, live_win_prob = prob_1_normalized, game_pair_id, status)
+  # ADDITIONAL VALIDATION: Remove finished games with 100%/0% for upcoming games
+  nba_today_validated <- nba_today_normalized %>%
+    mutate(
+      # Flag suspicious finished game data - if status is "Finished" but game_date is today
+      # and the game hasn't actually finished according to plaintextsports
+      is_suspicious = (status == "Finished" & 
+                      game_date == today_date &
+                      ((prob_1_normalized == 1 & prob_2_normalized == 0) |
+                       (prob_1_normalized == 0 & prob_2_normalized == 1)))
+    )
   
-  live_data_team2 <- nba_today_normalized %>%
-    select(Team = team_2, live_win_prob = prob_2_normalized, game_pair_id, status)
+  gambletron_diagnostics$suspicious_finished_games <- nba_today_validated %>%
+    filter(is_suspicious == TRUE) %>%
+    select(team_1, team_2, status, game_date, prob_1_normalized, prob_2_normalized)
+  
+  # Create one row per team with standardized names
+  live_data_team1 <- nba_today_validated %>%
+    select(Team = team_1, live_win_prob = prob_1_normalized, game_pair_id, status, is_suspicious)
+  
+  live_data_team2 <- nba_today_validated %>%
+    select(Team = team_2, live_win_prob = prob_2_normalized, game_pair_id, status, is_suspicious)
   
   live_data_combined <- bind_rows(live_data_team1, live_data_team2) %>%
     mutate(Team = trimws(Team)) %>%
@@ -464,35 +502,38 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
     )
   
   # For each standardized team, keep the most reliable probability
-  # Prioritize: Live > Starting Later > Finished
+  # Prioritize: Live > Starting Later > (Don't use suspicious Finished)
   live_data_final <- live_data_standardized %>%
     mutate(
       status_priority = case_when(
         status == "Live" ~ 1,
         status == "Starting Later" ~ 2,
-        status == "Finished" ~ 3,
-        TRUE ~ 4
+        status == "Finished" & is_suspicious == FALSE ~ 3,
+        TRUE ~ 999  # Exclude suspicious finished games
       )
     ) %>%
+    filter(status_priority < 999) %>%  # Exclude suspicious data
     arrange(Team, status_priority) %>%
     group_by(Team) %>%
     filter(!is.na(live_win_prob)) %>%
     slice(1) %>%
     ungroup() %>%
-    select(Team, live_win_prob)
+    select(Team, live_win_prob, status)
+  
+  gambletron_diagnostics$live_data_final <- live_data_final
   
   # Join with todays_picks
   todays_picks <- todays_picks %>%
     left_join(live_data_final, by = "Team") %>%
     mutate(
       Live_Expected_Skins = case_when(
-        is.na(live_win_prob) ~ `Expected Skins`,  # CHANGED: Default to Expected Skins if no live data
+        is.na(live_win_prob) ~ `Expected Skins`,  # Default to Expected Skins if no live data
         Pick == "W" ~ live_win_prob,
         Pick == "L" ~ 1 - live_win_prob,
         TRUE ~ `Expected Skins`
       )
     ) %>%
-    select(-live_win_prob)
+    select(-live_win_prob, -status)
   
   # ADDITIONAL FIX: For teams in the same game, ensure consistent probabilities
   # This helps when one team's probability was scraped but the other wasn't
@@ -1814,6 +1855,8 @@ p1 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Luck, color = Player, grou
   theme(
     plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
     legend.position = "bottom",
+    legend.text = element_text(size = 14),  # INCREASED legend text size
+    legend.title = element_text(size = 14, face = "bold"),  # INCREASED legend title size
     text = element_text(colour = "#FFFFFF"),
     axis.text = element_text(colour = "#FFFFFF"),
     axis.title = element_text(colour = "#FFFFFF"),
@@ -1837,6 +1880,8 @@ p2 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Expected, color = Player, 
   theme(
     plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
     legend.position = "bottom",
+    legend.text = element_text(size = 14),  # INCREASED legend text size
+    legend.title = element_text(size = 14, face = "bold"),  # INCREASED legend title size
     text = element_text(colour = "#FFFFFF"),
     axis.text = element_text(colour = "#FFFFFF"),
     axis.title = element_text(colour = "#FFFFFF"),
@@ -1850,4 +1895,99 @@ p2 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Expected, color = Player, 
   scale_color_brewer(palette = "Set2")
 
 print(p2)
+```
+
+---
+
+## Diagnostics: Gambletron Data Issues
+
+```{r diagnostics}
+#| echo: false
+#| results: 'asis'
+
+cat("\n\n### Gambletron Scraping Diagnostics\n\n")
+cat("**Purpose:** These diagnostics help identify issues with gambletron data when rendering fails on GitHub Actions.\n\n")
+
+if (exists("gambletron_diagnostics") && length(gambletron_diagnostics) > 0) {
+  
+  cat("#### Key Information\n\n")
+  cat("- **Today's Date String (m/d format):** ", gambletron_diagnostics$today_date_string, "\n")
+  cat("- **Skins Date:** ", gambletron_diagnostics$skins_date, "\n")
+  cat("- **Live Games Count:** ", gambletron_diagnostics$live_games_count, "\n")
+  cat("- **Starting Later Count:** ", gambletron_diagnostics$starting_later_count, "\n")
+  cat("- **Finished Games Count:** ", gambletron_diagnostics$finished_games_count, "\n")
+  cat("- **NBA Today Count (after filtering):** ", gambletron_diagnostics$nba_today_count, "\n\n")
+  
+  if (!is.null(gambletron_diagnostics$live_scrape_error)) {
+    cat("**LIVE SCRAPE ERROR:** ", gambletron_diagnostics$live_scrape_error, "\n\n")
+  }
+  
+  if (!is.null(gambletron_diagnostics$inactive_scrape_error)) {
+    cat("**INACTIVE SCRAPE ERROR:** ", gambletron_diagnostics$inactive_scrape_error, "\n\n")
+  }
+  
+  cat("#### Raw Gambletron Data (Before Filtering)\n\n")
+  
+  if (!is.null(gambletron_diagnostics$live_games_raw) && nrow(gambletron_diagnostics$live_games_raw) > 0) {
+    cat("**Live Games (Raw):**\n\n")
+    print(knitr::kable(gambletron_diagnostics$live_games_raw, format = "html") %>%
+            kable_styling(bootstrap_options = c("striped", "hover", "condensed")))
+    cat("\n\n")
+  }
+  
+  if (!is.null(gambletron_diagnostics$starting_later_raw) && nrow(gambletron_diagnostics$starting_later_raw) > 0) {
+    cat("**Starting Later Games (Raw):**\n\n")
+    print(knitr::kable(gambletron_diagnostics$starting_later_raw, format = "html") %>%
+            kable_styling(bootstrap_options = c("striped", "hover", "condensed")))
+    cat("\n\n")
+  }
+  
+  if (!is.null(gambletron_diagnostics$finished_games_raw) && nrow(gambletron_diagnostics$finished_games_raw) > 0) {
+    cat("**Finished Games (Raw):**\n\n")
+    print(knitr::kable(gambletron_diagnostics$finished_games_raw, format = "html") %>%
+            kable_styling(bootstrap_options = c("striped", "hover", "condensed")))
+    cat("\n\n")
+  }
+  
+  cat("#### Filtered NBA Data (After Date Filtering)\n\n")
+  
+  if (!is.null(gambletron_diagnostics$nba_today_data) && nrow(gambletron_diagnostics$nba_today_data) > 0) {
+    cat("**NBA Today (After Filtering):**\n")
+    cat("These games passed the filter: Live OR (Starting Later AND date matches today) OR (Finished AND date matches today)\n\n")
+    print(knitr::kable(gambletron_diagnostics$nba_today_data, format = "html") %>%
+            kable_styling(bootstrap_options = c("striped", "hover", "condensed")))
+    cat("\n\n")
+  }
+  
+  cat("#### Suspicious Finished Games\n\n")
+  
+  if (!is.null(gambletron_diagnostics$suspicious_finished_games) && nrow(gambletron_diagnostics$suspicious_finished_games) > 0) {
+    cat("**WARNING: These finished games have 100%/0% probabilities but are listed for today:**\n")
+    cat("These are likely from previous days and should have been filtered out.\n\n")
+    print(knitr::kable(gambletron_diagnostics$suspicious_finished_games, format = "html") %>%
+            kable_styling(bootstrap_options = c("striped", "hover", "condensed")))
+    cat("\n\n")
+  } else {
+    cat("✓ No suspicious finished games detected\n\n")
+  }
+  
+  cat("#### Final Live Data\n\n")
+  
+  if (!is.null(gambletron_diagnostics$live_data_final) && nrow(gambletron_diagnostics$live_data_final) > 0) {
+    cat("**Live Data Joined to Today's Picks:**\n\n")
+    print(knitr::kable(gambletron_diagnostics$live_data_final, format = "html") %>%
+            kable_styling(bootstrap_options = c("striped", "hover", "condensed")))
+    cat("\n\n")
+  }
+  
+  cat("#### Analysis\n\n")
+  cat("**Common Issues:**\n\n")
+  cat("1. **Finished games from previous days**: If 'Finished Games Count' > 0 and these games have today's date, they're incorrectly matched\n")
+  cat("2. **100%/0% probabilities on upcoming games**: Indicates finished game data is being applied to wrong teams\n")
+  cat("3. **Date format mismatch**: Check that 'Today's Date String' matches gambletron's date format\n")
+  cat("4. **Timezone issues**: Verify that skins_date aligns with when gambletron updates its data\n\n")
+  
+} else {
+  cat("No gambletron diagnostics available.\n")
+}
 ```
