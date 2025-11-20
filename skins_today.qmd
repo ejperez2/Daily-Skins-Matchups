@@ -1,6 +1,6 @@
 ---
 title: "Today's Skins"
-# VERSION: 2024-11-12-v4 (Fixed gambletron finished games issue, added diagnostics)
+# VERSION: 2024-11-19-v5 (Mobile improvements, Luck Leverage %, ordering, scores)
 format:
   html:
     self-contained: true
@@ -12,6 +12,19 @@ format:
         width: auto !important;
         margin-left: auto;
         margin-right: auto;
+      }
+      /* Mobile-friendly improvements */
+      @media (max-width: 768px) {
+        table {
+          font-size: 12px;
+        }
+        th, td {
+          padding: 4px !important;
+        }
+        .table-responsive {
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+        }
       }
 ---
 
@@ -759,7 +772,16 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
       `Live Skins Luck` = `Live Expected Skins` - `Total Expected Skins`
     ) %>%
     left_join(perfect_skins_calc, by = "Player") %>%
-    arrange(desc(`Total Expected Skins`)) %>%
+    # Calculate Luck Leverage column (whole number with % symbol)
+    mutate(
+      `Luck Leverage` = if_else(
+        `Total Expected Skins` == 0, 
+        "0%", 
+        paste0(sprintf("%.0f", (`Live Skins Luck` / `Total Expected Skins`) * 100), "%")
+      )
+    ) %>%
+    # CHANGED: Order by Live Skins Luck (descending)
+    arrange(desc(`Live Skins Luck`)) %>%
     mutate(
       # Apply color coding to Player column
       Player_Display = case_when(
@@ -780,28 +802,38 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
           cell_spec(sprintf("%.1f", `Live Skins Luck`), background = "#FFB6C6", color = "#000000 !important", 
                     bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
         TRUE ~ as.character(sprintf("%.1f", `Live Skins Luck`))
-      )
+      ),
+      # Format Perfect Skins % with % symbol
+      `Perfect Skins % Display` = paste0(sprintf("%.1f", `Perfect Skins %`), "%")
     ) %>%
     select(
       Player = Player_Display,
       `Live Skins Luck` = `Live Skins Luck Display`,
+      `Luck Leverage`,
       `Total Expected Skins`,
       `Live Expected Skins`,
       `Total Actual Skins`,
       `Skins Luck`,
-      `Perfect Skins %`
+      `Perfect Skins %` = `Perfect Skins % Display`
     )
   
-  # Add TOTAL row - FIXED: Calculate sum of Perfect Skins % column
+  # Add TOTAL row
   total_row <- data.frame(
     Player = "TOTAL",
     `Live Skins Luck` = sprintf("%.1f", sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE) - 
                          sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE)),
+    `Luck Leverage` = if_else(
+      sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE) == 0,
+      "0%",
+      paste0(sprintf("%.0f", ((sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE) - 
+        sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE)) / 
+       sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE)) * 100), "%")
+    ),
     `Total Expected Skins` = sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE),
     `Live Expected Skins` = sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE),
     `Total Actual Skins` = sum(todays_results_with_cumulative$Actual_Skins, na.rm = TRUE),
     `Skins Luck` = sum(todays_results_with_cumulative$Skins_Luck, na.rm = TRUE),
-    `Perfect Skins %` = sum(perfect_skins_calc$`Perfect Skins %`, na.rm = TRUE),
+    `Perfect Skins %` = paste0(sprintf("%.1f", sum(perfect_skins_calc$`Perfect Skins %`, na.rm = TRUE)), "%"),
     check.names = FALSE,
     stringsAsFactors = FALSE
   )
@@ -816,7 +848,7 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
     format = "html"
   ) %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(c(2, 6, 7), bold = TRUE) %>%
+    column_spec(c(2, 3, 7, 8), bold = TRUE) %>%
     row_spec(nrow(final_player_summary_with_total), bold = TRUE, background = "#444444")
 }
 ```
@@ -903,6 +935,8 @@ if (nrow(todays_picks) > 0) {
   # Create Won_Game lookup - only final games
   matchup_won_lookup <- data.frame(Abbr = character(), Won_Game = logical(), stringsAsFactors = FALSE)
   matchup_status_lookup <- data.frame(Abbr = character(), GameStatus = character(), stringsAsFactors = FALSE)
+  # FIXED: Create score lookup ONLY for games that are in progress or finished
+  matchup_score_lookup <- data.frame(Abbr = character(), Score = character(), stringsAsFactors = FALSE)
   
   if (nrow(matchup_game_results) > 0) {
     # Won_Game lookup for finished games
@@ -939,12 +973,30 @@ if (nrow(todays_picks) > 0) {
     
     matchup_status_lookup <- bind_rows(team_1_status, team_2_status) %>%
       distinct()
+    
+    # FIXED: Score lookup ONLY for games that are in progress or finished
+    games_with_scores <- matchup_game_results %>%
+      filter((InProgress == TRUE | Finished == TRUE) & !is.na(Score1) & !is.na(Score2))
+    
+    if (nrow(games_with_scores) > 0) {
+      team_1_scores <- games_with_scores %>%
+        mutate(Score = paste0(Score1, "-", Score2)) %>%
+        select(Abbr = Team1, Score)
+      
+      team_2_scores <- games_with_scores %>%
+        mutate(Score = paste0(Score2, "-", Score1)) %>%
+        select(Abbr = Team2, Score)
+      
+      matchup_score_lookup <- bind_rows(team_1_scores, team_2_scores) %>%
+        distinct()
+    }
   }
   
-  # Update todays_picks with Won_Game and GameStatus
+  # Update todays_picks with Won_Game, GameStatus, and Score
   todays_picks <- todays_picks %>%
     left_join(matchup_won_lookup, by = "Abbr", suffix = c("", "_new")) %>%
     left_join(matchup_status_lookup, by = "Abbr") %>%
+    left_join(matchup_score_lookup, by = "Abbr") %>%
     mutate(
       Won_Game = coalesce(Won_Game_new, Won_Game),
       Won_Skin = case_when(
@@ -953,9 +1005,10 @@ if (nrow(todays_picks) > 0) {
         is.na(Won_Game) ~ NA,
         TRUE ~ FALSE
       ),
-      Game_Status = if_else(is.na(GameStatus), "Not Started", GameStatus)
+      Game_Status = if_else(is.na(GameStatus), "Not Started", GameStatus),
+      Game_Score = if_else(is.na(Score), "", Score)
     ) %>%
-    select(-Won_Game_new, -GameStatus)
+    select(-Won_Game_new, -GameStatus, -Score)
   
   # Build the matchup table - ONE ROW PER GAME
   matchup_prep <- todays_picks %>%
@@ -979,12 +1032,14 @@ if (nrow(todays_picks) > 0) {
       Won_Skin_1 = first(Won_Skin),
       # IMPROVED: Get first non-NA live expected skins
       Live_Skin_Prob_1 = coalesce(first(Cumulative_Live_Expected), first(`Expected Skins`)),
+      Score_1 = first(Game_Score),
       Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
       Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
       Pick_2 = if(n() > 1) nth(Pick, 2) else NA_character_,
       Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA,
       # IMPROVED: Get second non-NA live expected skins
       Live_Skin_Prob_2 = if(n() > 1) coalesce(nth(Cumulative_Live_Expected, 2), nth(`Expected Skins`, 2)) else NA,
+      Score_2 = if(n() > 1) nth(Game_Score, 2) else NA_character_,
       Status = first(Game_Status),
       game_time_ct = first(game_time_ct),
       .groups = 'drop'
@@ -1060,6 +1115,9 @@ if (nrow(todays_picks) > 0) {
       # Format Live Probabilities - now should always have values
       Live_Prob_1_Display = if_else(is.na(Live_Skin_Prob_1), "", paste0(sprintf("%.0f", Live_Skin_Prob_1 * 100), "%")),
       Live_Prob_2_Display = if_else(is.na(Live_Skin_Prob_2), "", paste0(sprintf("%.0f", Live_Skin_Prob_2 * 100), "%")),
+      # FIXED: Format combined score (use first team's score which is in Team1-Team2 format)
+      # Only show if not empty
+      Combined_Score = if_else(is.na(Score_1) | Score_1 == "", "", Score_1),
       # Create vs. display
       VS = if_else(is.na(Player_2), "", "vs."),
       Team_2_Display = if_else(is.na(Team_2), "", Team_2),
@@ -1078,7 +1136,8 @@ if (nrow(todays_picks) > 0) {
       `Pick 2` = Pick_2_Display,
       `Won Skin 2` = Won_2,
       `Live Skin Prob 2` = Live_Prob_2_Display, 
-      Status = Status_CT
+      Status = Status_CT,
+      Score = Combined_Score
     )
   
   # Create the table with HTML formatting enabled
@@ -1479,6 +1538,14 @@ if (file.exists(yesterday_file)) {
             Skins_Luck_Total = sum(Skins_Luck, na.rm = TRUE),
             .groups = 'drop'
           ) %>%
+          # Calculate Luck Leverage column (whole number with % symbol)
+          mutate(
+            `Luck Leverage` = if_else(
+              Total_Expected_Skins == 0,
+              "0%",
+              paste0(sprintf("%.0f", (Skins_Luck_Total / Total_Expected_Skins) * 100), "%")
+            )
+          ) %>%
           rename(
             `Total Expected Skins` = Total_Expected_Skins,
             `Total Actual Skins` = Total_Actual_Skins,
@@ -1501,7 +1568,8 @@ if (file.exists(yesterday_file)) {
             Player = Player_Display,
             `Total Expected Skins`,
             `Total Actual Skins`,
-            `Skins Luck`
+            `Skins Luck`,
+            `Luck Leverage`
           )
         
         # Add TOTAL row
@@ -1510,6 +1578,12 @@ if (file.exists(yesterday_file)) {
           `Total Expected Skins` = sum(yesterday_with_game$Expected_Skins, na.rm = TRUE),
           `Total Actual Skins` = sum(yesterday_with_game$Actual_Skins, na.rm = TRUE),
           `Skins Luck` = sum(yesterday_with_game$Skins_Luck, na.rm = TRUE),
+          `Luck Leverage` = if_else(
+            sum(yesterday_with_game$Expected_Skins, na.rm = TRUE) == 0,
+            "0%",
+            paste0(sprintf("%.0f", (sum(yesterday_with_game$Skins_Luck, na.rm = TRUE) / 
+             sum(yesterday_with_game$Expected_Skins, na.rm = TRUE)) * 100), "%")
+          ),
           check.names = FALSE,
           stringsAsFactors = FALSE
         )
@@ -1526,7 +1600,7 @@ if (file.exists(yesterday_file)) {
           format = "html"
         ) %>%
           kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-          column_spec(4, bold = TRUE) %>%
+          column_spec(c(4, 5), bold = TRUE) %>%
           row_spec(nrow(yesterday_player_summary_with_total), bold = TRUE, background = "#444444"))
       }
     }
