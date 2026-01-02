@@ -1669,7 +1669,8 @@ if (length(all_files) > 0) {
     all_history <- bind_rows(lapply(valid_files, function(f) read_csv(f, show_col_types = FALSE)))
     current_year <- year(today_ct)
     ytd_data <- all_history %>%
-      filter(year(Date) == current_year, !is.na(Actual_Skins))
+      filter(Date >= baseline_date, !is.na(Actual_Skins))
+
   }
 }
 
