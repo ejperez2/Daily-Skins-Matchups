@@ -1,34 +1,14 @@
-# Trivial comment added to force GitHub to re-register this workflow.
 name: Render and Publish Skins Page
 
 on:
-  # Schedule based on UTC time
   schedule:
-  - cron: '*/20 * * * *'
-    # --- CURRENT SCHEDULE (CST / UTC-6) ---
-    # 7:15 AM CST
-#  - cron: '15 13 * * *'
-    # 12:00 PM CST (Noon)
-#  - cron: '0 18 * * *'
-    
-                          # 6:00 PM - 12:40 AM CST (Every 20 mins)
-                        # (00:00 - 06:40 UTC)
-                                   #  - cron: '*/20 0-6 * * *'
-                                 # - cron: '*/20 17-23 * * *'
-   # Use 23:59 UTC as a proxy for 00:00
-#  - cron: '59 23 * * *'        # 5:59 PM CST (1 min before 6)
-#  - cron: '19,39,59 0 * * *'   # 6:19, 6:39, 6:59 PM CST
-#  - cron: '19,39,59 1 * * *'   # 7:19, 7:39, 7:59 PM CST
-#  - cron: '*/20 2-6 * * *'     # 8:00 PM onwards
-
-    # 1:00 AM, 1:20 AM, 1:30 AM CST
-    # (07:00, 07:20, 07:30 UTC)
-#  - cron: '0,20,30 7 * * *'
-
-  # Allows you to run this workflow manually from the Actions tab
+    # 1. Every 20 mins from 6:00 PM to 11:40 PM CST (00:00 to 05:40 UTC)
+    - cron: '*/20 0-5 * * *'
+    # 2. Every 3 hours from Midnight to 5:00 PM CST (06:00 to 23:00 UTC)
+    - cron: '0 6-23/3 * * *'
+  
   workflow_dispatch:
 
-# Set permissions for the job
 permissions:
   contents: write
   pages: write
@@ -42,41 +22,39 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0 
-      
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libcurl4-openssl-dev \
-            libxml2-dev \
-            libssl-dev \
-            libfontconfig1-dev \
-            libfreetype6-dev \
-            libfribidi-dev \
-            libharfbuzz-dev \
-            libpng-dev
-      
+
       - name: Set up R
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: 'latest'
-      
+          use-public-rspm: true # Uses binaries to avoid 11-minute build times
+
       - name: Set up Quarto
         uses: quarto-dev/quarto-actions/setup@v2
-      
+
       - name: Install R Dependencies
-        run: |
-          R -e "install.packages('pacman', dependencies = TRUE)"
-          R -e "pacman::p_load(rvest, httr, dplyr, tidyr, stringr, lubridate, tibble, knitr, kableExtra, readr, ggplot2)"
-      
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            any::rvest
+            any::httr
+            any::dplyr
+            any::tidyr
+            any::stringr
+            any::lubridate
+            any::tibble
+            any::knitr
+            any::kableExtra
+            any::readr
+            any::ggplot2
+            any::pacman
+
       - name: Create history directory
-        run: |
-          mkdir -p skins_history
-      
+        [cite_start]run: mkdir -p skins_history [cite: 7]
+
       - name: Render Quarto Document
-        run: |
-          quarto render skins_today.qmd --to html --output-dir _site --output index.html
-      
+        [cite_start]run: quarto render skins_today.qmd --to html --output-dir _site --output index.html [cite: 1]
+
       - name: Commit history updates
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
@@ -85,12 +63,12 @@ jobs:
           git diff --staged --quiet || git commit -m "Update skins history - $(date +'%Y-%m-%d')"
           git push
         continue-on-error: true 
-      
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: './_site'
-      
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
