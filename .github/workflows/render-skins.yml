@@ -1,10 +1,11 @@
 name: Render and Publish Skins Page
 
 on:
+  # Schedule based on UTC (CST is UTC-6)
   schedule:
-    # 1. Every 20 mins from 6:00 PM to 11:40 PM CST (00:00 to 05:40 UTC)
+    # 6:00 PM – 11:40 PM CST (Every 20 mins) -> 00:00 – 05:40 UTC
     - cron: '*/20 0-5 * * *'
-    # 2. Every 3 hours from Midnight to 5:00 PM CST (06:00 to 23:00 UTC)
+    # Midnight – 5:59 PM CST (Every 3 hours) -> 06:00 – 23:59 UTC
     - cron: '0 6-23/3 * * *'
   
   workflow_dispatch:
@@ -27,7 +28,7 @@ jobs:
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: 'latest'
-          use-public-rspm: true # Uses binaries to avoid 11-minute build times
+          use-public-rspm: true 
 
       - name: Set up Quarto
         uses: quarto-dev/quarto-actions/setup@v2
@@ -61,14 +62,14 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git add skins_history/*.csv
           git diff --staged --quiet || git commit -m "Update skins history - $(date +'%Y-%m-%d')"
-          git push
+          git push [cite: 1, 62]
         continue-on-error: true 
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './_site'
+          [cite_start]path: './_site' [cite: 1]
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        [cite_start]uses: actions/deploy-pages@v4 [cite: 1]
