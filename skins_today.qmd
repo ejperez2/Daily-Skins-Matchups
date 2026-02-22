@@ -697,7 +697,27 @@ if (nrow(todays_picks) > 0) {
     ) %>%
     select(-Won_Game_new)
   
-  # 7. Save today's results to file (use underscores for easier CSV handling)
+  # 7. Create score lookup for finished games
+  finished_score_lookup <- data.frame(Abbr = character(), Final_Score = character(), stringsAsFactors = FALSE)
+  
+  if (nrow(all_game_results) > 0) {
+    finished_only <- all_game_results %>% filter(Finished == TRUE & !is.na(Score1) & !is.na(Score2))
+    if (nrow(finished_only) > 0) {
+      team1_scores <- finished_only %>%
+        mutate(Final_Score = paste0(Score1, "-", Score2)) %>%
+        select(Abbr = Team1, Final_Score)
+      team2_scores <- finished_only %>%
+        mutate(Final_Score = paste0(Score2, "-", Score1)) %>%
+        select(Abbr = Team2, Final_Score)
+      finished_score_lookup <- bind_rows(team1_scores, team2_scores)
+    }
+  }
+  
+  todays_results <- todays_results %>%
+    left_join(finished_score_lookup, by = "Abbr") %>%
+    mutate(Final_Score = if_else(is.na(Final_Score), "", Final_Score))
+  
+  # 8. Save today's results to file (use underscores for easier CSV handling)
   # This now correctly uses today_ct (which is skins_date) as the filename
   today_file <- file.path(history_dir, paste0(today_ct, ".csv"))
   
@@ -706,7 +726,7 @@ if (nrow(todays_picks) > 0) {
       Date, Player, Team, Abbr, Pick, 
       Expected_Skins = `Expected Skins`, 
       Won_Game, Actual_Skins, Skins_Luck,
-      game_id
+      game_id, Final_Score
     ) %>%
     write_csv(today_file)
 } else {
@@ -766,6 +786,7 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
       `Live Expected Skins` = sum(Cumulative_Live_Expected, na.rm = TRUE),
       `Total Actual Skins` = sum(Actual_Skins, na.rm = TRUE),
       `Skins Luck` = sum(Skins_Luck, na.rm = TRUE),
+      `Total Games` = n(),
       .groups = 'drop'
     ) %>%
     mutate(
@@ -810,8 +831,9 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
       Player = Player_Display,
       `Live Skins Luck` = `Live Skins Luck Display`,
       `Luck Leverage`,
-      `Total Expected Skins`,
       `Live Expected Skins`,
+      `Total Expected Skins`,
+      `Total Games`,
       `Total Actual Skins`,
       `Skins Luck`,
       `Perfect Skins %` = `Perfect Skins % Display`
@@ -829,8 +851,9 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
         sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE)) / 
        sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE)) * 100), "%")
     ),
-    `Total Expected Skins` = sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE),
     `Live Expected Skins` = sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE),
+    `Total Expected Skins` = sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE),
+    `Total Games` = nrow(todays_results_with_cumulative),
     `Total Actual Skins` = sum(todays_results_with_cumulative$Actual_Skins, na.rm = TRUE),
     `Skins Luck` = sum(todays_results_with_cumulative$Skins_Luck, na.rm = TRUE),
     `Perfect Skins %` = paste0(sprintf("%.1f", sum(perfect_skins_calc$`Perfect Skins %`, na.rm = TRUE)), "%"),
@@ -848,7 +871,7 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
     format = "html"
   ) %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(c(2, 3, 7, 8), bold = TRUE) %>%
+    column_spec(c(2, 3, 8, 9), bold = TRUE) %>%
     row_spec(nrow(final_player_summary_with_total), bold = TRUE, background = "#444444")
 }
 ```
@@ -1346,19 +1369,29 @@ if (nrow(todays_picks) > 0) {
             cell_spec(Player, background = "#FFB6C6", color = "#000000 !important", 
                       bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
           TRUE ~ Player
+        ),
+        # Apply color-coding to Team column
+        Team_Display = case_when(
+          !is.na(Won_Skin) & Won_Skin == TRUE ~ 
+            cell_spec(Team, background = "#90EE90", color = "#000000 !important", 
+                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+          !is.na(Won_Skin) & Won_Skin == FALSE ~ 
+            cell_spec(Team, background = "#FFB6C6", color = "#000000 !important", 
+                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
+          TRUE ~ Team
         )
       ) %>%
       select(-Won_Game_final, -Actual_Skins_final)
   } else {
-    # No results yet, use original Player column
+    # No results yet, use original Player and Team columns
     team_table_data <- team_table_data %>%
-      mutate(Player_Display = Player)
+      mutate(Player_Display = Player, Team_Display = Team)
   }
   
   # Format the table and sort by Player, then Expected Skins within Player
   team_table_data <- team_table_data %>%
     mutate(`Implied Prob` = if_else(is.na(`Implied Prob`), "", paste0(sprintf("%.0f", `Implied Prob` * 100), "%"))) %>%
-    select(Team, Pick, `Expected Skins`, Player = Player_Display, Moneyline, `Implied Prob`, Player_Raw = Player) %>%
+    select(Team = Team_Display, Pick, `Expected Skins`, Player = Player_Display, Moneyline, `Implied Prob`, Player_Raw = Player) %>%
     arrange(Player_Raw, desc(`Expected Skins`)) %>%
     select(-Player_Raw)
   
@@ -1403,19 +1436,23 @@ if (file.exists(yesterday_file)) {
     yesterday_lines <- strsplit(yesterday_text, "\n")[[1]]
     yesterday_boxes <- yesterday_lines[grepl("^\\+", yesterday_lines)]
     
-    # Parse game boxes to get actual matchups
+    # Parse game boxes to get actual matchups and scores
     parse_game_box <- function(box) {
       parts <- strsplit(box, "\\|")[[1]]
       status <- str_trim(parts[2])
       team1_line <- str_trim(parts[4])
       team1_name <- str_extract(team1_line, "[A-Z]{2,3}")
+      team1_score <- suppressWarnings(as.numeric(str_extract(team1_line, "[0-9]+$")))
       team2_line <- str_trim(parts[6])
       team2_name <- str_extract(team2_line, "[A-Z]{2,3}")
+      team2_score <- suppressWarnings(as.numeric(str_extract(team2_line, "[0-9]+$")))
       is_final <- grepl("Final", status, fixed = TRUE)
       
       data.frame(
         Team1 = team1_name,
         Team2 = team2_name,
+        Score1 = team1_score,
+        Score2 = team2_score,
         Status = status,
         Finished = is_final,
         stringsAsFactors = FALSE
@@ -1439,6 +1476,19 @@ if (file.exists(yesterday_file)) {
           scrape_game_id = paste0("game_", row_number())
         )
       
+      # Create score lookup for finished games
+      yesterday_score_lookup <- data.frame(Abbr = character(), Scraped_Score = character(), stringsAsFactors = FALSE)
+      finished_yesterday <- yesterday_matchups %>% filter(Finished == TRUE & !is.na(Score1) & !is.na(Score2))
+      if (nrow(finished_yesterday) > 0) {
+        score_team1 <- finished_yesterday %>%
+          mutate(Scraped_Score = paste0(Score1, "-", Score2)) %>%
+          select(Abbr = Team1, Scraped_Score)
+        score_team2 <- finished_yesterday %>%
+          mutate(Scraped_Score = paste0(Score2, "-", Score1)) %>%
+          select(Abbr = Team2, Scraped_Score)
+        yesterday_score_lookup <- bind_rows(score_team1, score_team2)
+      }
+      
       # Create lookup: each team to its game_id
       team_to_game <- bind_rows(
         yesterday_matchups %>% select(Abbr = Team1, scrape_game_id),
@@ -1448,7 +1498,14 @@ if (file.exists(yesterday_file)) {
       # Join CSV data with game_id from actual matchups
       yesterday_with_game <- yesterday_data %>%
         left_join(team_to_game, by = "Abbr") %>%
+        left_join(yesterday_score_lookup, by = "Abbr") %>%
         mutate(
+          # Use scraped score if available, otherwise fall back to stored Final_Score column (if it exists)
+          Final_Score_Display = case_when(
+            !is.na(Scraped_Score) & Scraped_Score != "" ~ Scraped_Score,
+            "Final_Score" %in% names(yesterday_data) & !is.na(Final_Score) & Final_Score != "" ~ as.character(Final_Score),
+            TRUE ~ ""
+          ),
           Won_Skin = case_when(
             is.na(Won_Game) ~ NA,
             Pick == "W" & Won_Game == TRUE ~ TRUE,
@@ -1467,10 +1524,13 @@ if (file.exists(yesterday_file)) {
           Team_1 = first(Team),
           Pick_1 = first(Pick),
           Won_Skin_1 = first(Won_Skin),
+          Expected_Skin_1 = round(first(Expected_Skins), 1),
           Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
           Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
           Pick_2 = if(n() > 1) nth(Pick, 2) else NA_character_,
           Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA,
+          Expected_Skin_2 = if(n() > 1) round(nth(Expected_Skins, 2), 1) else NA_real_,
+          Final_Score_Game = first(Final_Score_Display),
           Status = first(Game_Status),
           .groups = 'drop'
         ) %>%
@@ -1516,12 +1576,14 @@ if (file.exists(yesterday_file)) {
           Team = Team_1,
           Pick = Pick_1,
           `Won Skin` = Won_1,
+          `Expected Skin` = Expected_Skin_1,
           VS,
           `Player 2` = Player_2_Display,
           `Team 2` = Team_2_Display,
           `Pick 2` = Pick_2_Display,
           `Won Skin 2` = Won_2,
-          Status
+          `Expected Skin 2` = Expected_Skin_2,
+          `Final Score` = Final_Score_Game
         )
       
       if (nrow(yesterday_matchup_table) > 0) {
@@ -1704,12 +1766,12 @@ if (nrow(ytd_data) > 0) {
     select(Player, Cumulative_Skins_Luck, Games, Total_Expected_Skins, Total_Actual_Skins) %>%
     mutate(
       Expected_Skins_Pct = if_else(Games == 0, 0, (Total_Expected_Skins / Games) * 100),
-      Avg_Skins_Luck_per_Game = if_else(Games == 0, 0, Cumulative_Skins_Luck / Games)
+      Actual_Skins_Pct = if_else(Games == 0, 0, (Total_Actual_Skins / Games) * 100)
     ) %>%
     rename(
       `Total Expected Skins` = Total_Expected_Skins, `Total Actual Skins` = Total_Actual_Skins,
       `Cumulative Skins Luck` = Cumulative_Skins_Luck, `Expected Skins %` = Expected_Skins_Pct,
-      `Avg Skins Luck per Game` = Avg_Skins_Luck_per_Game
+      `Actual Skins %` = Actual_Skins_Pct
     ) %>%
     arrange(desc(`Cumulative Skins Luck`))
   
@@ -1719,7 +1781,7 @@ if (nrow(ytd_data) > 0) {
   total_actual <- sum(ytd_summary$`Total Actual Skins`)
   total_luck <- sum(ytd_summary$`Cumulative Skins Luck`)
   weighted_avg_expected_pct <- if_else(total_games == 0, 0, (total_expected / total_games) * 100)
-  weighted_avg_luck <- if_else(total_games == 0, 0, total_luck / total_games)
+  weighted_avg_actual_pct <- if_else(total_games == 0, 0, (total_actual / total_games) * 100)
   
   total_row <- data.frame(
     Player = "TOTAL",
@@ -1728,7 +1790,7 @@ if (nrow(ytd_data) > 0) {
     `Total Expected Skins` = total_expected,
     `Total Actual Skins` = total_actual,
     `Expected Skins %` = weighted_avg_expected_pct,
-    `Avg Skins Luck per Game` = weighted_avg_luck,
+    `Actual Skins %` = weighted_avg_actual_pct,
     check.names = FALSE
   )
   
@@ -1779,7 +1841,7 @@ if (nrow(ytd_data) > 0) {
       )
     ) %>%
     select(Player, `Cumulative Skins Luck` = `Cumulative Skins Luck Display`, Games, 
-           `Total Expected Skins`, `Total Actual Skins`, `Expected Skins %`, `Avg Skins Luck per Game`)
+           `Total Expected Skins`, `Total Actual Skins`, `Expected Skins %`, `Actual Skins %`)
   
   knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats"), escape = FALSE, format = "html") %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
@@ -1791,12 +1853,12 @@ if (nrow(ytd_data) > 0) {
     select(Player, Cumulative_Skins_Luck, Games, Total_Expected_Skins, Total_Actual_Skins) %>%
     mutate(
       Expected_Skins_Pct = if_else(Games == 0, 0, (Total_Expected_Skins / Games) * 100),
-      Avg_Skins_Luck_per_Game = if_else(Games == 0, 0, Cumulative_Skins_Luck / Games)
+      Actual_Skins_Pct = if_else(Games == 0, 0, (Total_Actual_Skins / Games) * 100)
     ) %>%
     rename(
       `Total Expected Skins` = Total_Expected_Skins, `Total Actual Skins` = Total_Actual_Skins,
       `Cumulative Skins Luck` = Cumulative_Skins_Luck, `Expected Skins %` = Expected_Skins_Pct,
-      `Avg Skins Luck per Game` = Avg_Skins_Luck_per_Game
+      `Actual Skins %` = Actual_Skins_Pct
     ) %>%
     arrange(desc(`Cumulative Skins Luck`))
   
@@ -1806,7 +1868,7 @@ if (nrow(ytd_data) > 0) {
   total_actual <- sum(ytd_summary$`Total Actual Skins`)
   total_luck <- sum(ytd_summary$`Cumulative Skins Luck`)
   weighted_avg_expected_pct <- if_else(total_games == 0, 0, (total_expected / total_games) * 100)
-  weighted_avg_luck <- if_else(total_games == 0, 0, total_luck / total_games)
+  weighted_avg_actual_pct <- if_else(total_games == 0, 0, (total_actual / total_games) * 100)
   
   total_row <- data.frame(
     Player = "TOTAL",
@@ -1815,7 +1877,7 @@ if (nrow(ytd_data) > 0) {
     `Total Expected Skins` = total_expected,
     `Total Actual Skins` = total_actual,
     `Expected Skins %` = weighted_avg_expected_pct,
-    `Avg Skins Luck per Game` = weighted_avg_luck,
+    `Actual Skins %` = weighted_avg_actual_pct,
     check.names = FALSE
   )
   
@@ -1866,7 +1928,7 @@ if (nrow(ytd_data) > 0) {
       )
     ) %>%
     select(Player, `Cumulative Skins Luck` = `Cumulative Skins Luck Display`, Games, 
-           `Total Expected Skins`, `Total Actual Skins`, `Expected Skins %`, `Avg Skins Luck per Game`)
+           `Total Expected Skins`, `Total Actual Skins`, `Expected Skins %`)
     
   knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats (Baseline)"), escape = FALSE, format = "html") %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
