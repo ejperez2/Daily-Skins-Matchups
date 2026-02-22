@@ -1496,14 +1496,19 @@ if (file.exists(yesterday_file)) {
       )
       
       # Join CSV data with game_id from actual matchups
+      # Safely add Final_Score column if it doesn't exist in the CSV
+      if (!"Final_Score" %in% names(yesterday_data)) {
+        yesterday_data <- yesterday_data %>% mutate(Final_Score = NA_character_)
+      }
+      
       yesterday_with_game <- yesterday_data %>%
         left_join(team_to_game, by = "Abbr") %>%
         left_join(yesterday_score_lookup, by = "Abbr") %>%
         mutate(
-          # Use scraped score if available, otherwise fall back to stored Final_Score column (if it exists)
+          # Use scraped score if available, otherwise fall back to stored Final_Score column
           Final_Score_Display = case_when(
             !is.na(Scraped_Score) & Scraped_Score != "" ~ Scraped_Score,
-            "Final_Score" %in% names(yesterday_data) & !is.na(Final_Score) & Final_Score != "" ~ as.character(Final_Score),
+            !is.na(Final_Score) & Final_Score != "" ~ as.character(Final_Score),
             TRUE ~ ""
           ),
           Won_Skin = case_when(
@@ -1676,6 +1681,44 @@ if (file.exists(yesterday_file)) {
 }
 ```
 
+```{r yesterday_diagnostics}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: 'asis'
+
+cat("\n\n### Yesterday's Results Diagnostics\n\n")
+
+cat("- **Yesterday date:** ", as.character(yesterday_ct), "\n")
+cat("- **Yesterday file path:** ", file.path(history_dir, paste0(yesterday_ct, ".csv")), "\n")
+cat("- **Yesterday file exists:** ", file.exists(file.path(history_dir, paste0(yesterday_ct, ".csv"))), "\n")
+
+if (file.exists(file.path(history_dir, paste0(yesterday_ct, ".csv")))) {
+  ydiag <- read_csv(file.path(history_dir, paste0(yesterday_ct, ".csv")), show_col_types = FALSE)
+  cat("- **Rows in yesterday CSV:** ", nrow(ydiag), "\n")
+  cat("- **Columns in yesterday CSV:** ", paste(names(ydiag), collapse = ", "), "\n")
+  cat("- **Has Final_Score column:** ", "Final_Score" %in% names(ydiag), "\n")
+  cat("- **Has Scraped_Score column (from join):** Only present after join with scrape lookup\n")
+  
+  # Try scraping yesterday's plaintextsports page
+  tryCatch({
+    ydiag_url <- paste0("https://plaintextsports.com/nba/", yesterday_ct, "/")
+    ydiag_page <- read_html(ydiag_url)
+    ydiag_text <- ydiag_page %>% html_element("body") %>% html_text2()
+    ydiag_lines <- strsplit(ydiag_text, "\n")[[1]]
+    ydiag_boxes <- ydiag_lines[grepl("^\\+", ydiag_lines)]
+    cat("- **Game boxes scraped from plaintextsports:** ", length(ydiag_boxes), "\n")
+    if (length(ydiag_boxes) > 0) {
+      cat("- **First box (raw):** `", ydiag_boxes[1], "`\n")
+    }
+  }, error = function(e) {
+    cat("- **Scrape error:** ", as.character(e), "\n")
+  })
+} else {
+  cat("- **ERROR:** Yesterday's CSV not found — this is why the table is missing.\n")
+}
+```
+
 ---
 
 ## Year-to-Date Cumulative Stats
@@ -1765,13 +1808,11 @@ if (nrow(ytd_data) > 0) {
     ) %>%
     select(Player, Cumulative_Skins_Luck, Games, Total_Expected_Skins, Total_Actual_Skins) %>%
     mutate(
-      Expected_Skins_Pct = if_else(Games == 0, 0, (Total_Expected_Skins / Games) * 100),
-      Actual_Skins_Pct = if_else(Games == 0, 0, (Total_Actual_Skins / Games) * 100)
+      Expected_Skins_Pct = if_else(Games == 0, 0, (Total_Expected_Skins / Games) * 100)
     ) %>%
     rename(
       `Total Expected Skins` = Total_Expected_Skins, `Total Actual Skins` = Total_Actual_Skins,
-      `Cumulative Skins Luck` = Cumulative_Skins_Luck, `Expected Skins %` = Expected_Skins_Pct,
-      `Actual Skins %` = Actual_Skins_Pct
+      `Cumulative Skins Luck` = Cumulative_Skins_Luck, `Expected Skins %` = Expected_Skins_Pct
     ) %>%
     arrange(desc(`Cumulative Skins Luck`))
   
@@ -1781,7 +1822,6 @@ if (nrow(ytd_data) > 0) {
   total_actual <- sum(ytd_summary$`Total Actual Skins`)
   total_luck <- sum(ytd_summary$`Cumulative Skins Luck`)
   weighted_avg_expected_pct <- if_else(total_games == 0, 0, (total_expected / total_games) * 100)
-  weighted_avg_actual_pct <- if_else(total_games == 0, 0, (total_actual / total_games) * 100)
   
   total_row <- data.frame(
     Player = "TOTAL",
@@ -1790,7 +1830,6 @@ if (nrow(ytd_data) > 0) {
     `Total Expected Skins` = total_expected,
     `Total Actual Skins` = total_actual,
     `Expected Skins %` = weighted_avg_expected_pct,
-    `Actual Skins %` = weighted_avg_actual_pct,
     check.names = FALSE
   )
   
@@ -1841,7 +1880,7 @@ if (nrow(ytd_data) > 0) {
       )
     ) %>%
     select(Player, `Cumulative Skins Luck` = `Cumulative Skins Luck Display`, Games, 
-           `Total Expected Skins`, `Total Actual Skins`, `Expected Skins %`, `Actual Skins %`)
+           `Total Expected Skins`, `Total Actual Skins`, `Expected Skins %`)
   
   knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats"), escape = FALSE, format = "html") %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
@@ -1852,13 +1891,11 @@ if (nrow(ytd_data) > 0) {
   ytd_summary <- ytd_baseline %>%
     select(Player, Cumulative_Skins_Luck, Games, Total_Expected_Skins, Total_Actual_Skins) %>%
     mutate(
-      Expected_Skins_Pct = if_else(Games == 0, 0, (Total_Expected_Skins / Games) * 100),
-      Actual_Skins_Pct = if_else(Games == 0, 0, (Total_Actual_Skins / Games) * 100)
+      Expected_Skins_Pct = if_else(Games == 0, 0, (Total_Expected_Skins / Games) * 100)
     ) %>%
     rename(
       `Total Expected Skins` = Total_Expected_Skins, `Total Actual Skins` = Total_Actual_Skins,
-      `Cumulative Skins Luck` = Cumulative_Skins_Luck, `Expected Skins %` = Expected_Skins_Pct,
-      `Actual Skins %` = Actual_Skins_Pct
+      `Cumulative Skins Luck` = Cumulative_Skins_Luck, `Expected Skins %` = Expected_Skins_Pct
     ) %>%
     arrange(desc(`Cumulative Skins Luck`))
   
@@ -1868,7 +1905,6 @@ if (nrow(ytd_data) > 0) {
   total_actual <- sum(ytd_summary$`Total Actual Skins`)
   total_luck <- sum(ytd_summary$`Cumulative Skins Luck`)
   weighted_avg_expected_pct <- if_else(total_games == 0, 0, (total_expected / total_games) * 100)
-  weighted_avg_actual_pct <- if_else(total_games == 0, 0, (total_actual / total_games) * 100)
   
   total_row <- data.frame(
     Player = "TOTAL",
@@ -1877,7 +1913,6 @@ if (nrow(ytd_data) > 0) {
     `Total Expected Skins` = total_expected,
     `Total Actual Skins` = total_actual,
     `Expected Skins %` = weighted_avg_expected_pct,
-    `Actual Skins %` = weighted_avg_actual_pct,
     check.names = FALSE
   )
   
