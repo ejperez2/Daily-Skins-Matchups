@@ -274,8 +274,6 @@ if (nrow(todays_picks) > 0) {
 # This chunk scrapes live win probabilities from gambletron
 # and joins them with our 'todays_picks' data.
 
-# Initialize diagnostics list
-gambletron_diagnostics <- list()
 
 # Always scrape live data regardless of blackout window
 # --- Define URLs ---
@@ -326,11 +324,8 @@ tryCatch({
     }) %>%
     bind_rows()
   
-  gambletron_diagnostics$live_games_count <- nrow(live_games)
-  gambletron_diagnostics$live_games_raw <- live_games
 }, error = function(e) {
   live_games <- data.frame()
-  gambletron_diagnostics$live_scrape_error <- as.character(e)
 })
 
 # --- 2. Scrape "Inactive" Games (Starting Later & Finished) ---
@@ -356,8 +351,6 @@ tryCatch({
     }) %>%
     bind_rows()
   
-  gambletron_diagnostics$starting_later_count <- nrow(starting_later_games)
-  gambletron_diagnostics$starting_later_raw <- starting_later_games
   
   # --- 2b. Parse "Finished" ---
   finished_nodes <- webpage_inactive %>% 
@@ -380,12 +373,9 @@ tryCatch({
     }) %>%
     bind_rows()
   
-  gambletron_diagnostics$finished_games_count <- nrow(finished_games)
-  gambletron_diagnostics$finished_games_raw <- finished_games
 }, error = function(e) {
   starting_later_games <- data.frame()
   finished_games <- data.frame()
-  gambletron_diagnostics$inactive_scrape_error <- as.character(e)
 })
 
 # --- 3. Combine all data ---
@@ -396,8 +386,6 @@ m <- sub("^0", "", format(skins_date, "%m"))  # FIXED: Use skins_date instead of
 d <- sub("^0", "", format(skins_date, "%d"))  # FIXED: Use skins_date instead of Sys.Date()
 today_date <- paste(m, d, sep="/")
 
-gambletron_diagnostics$today_date_string <- today_date
-gambletron_diagnostics$skins_date <- as.character(skins_date)
 
 # --- 5. Filter for NBA and Today ---
 # CRITICAL FIX: Only include finished games if they have today's date
@@ -410,8 +398,6 @@ nba_today <- all_games %>%
      (status == "Finished" & game_date == today_date))  # FIXED: Only include finished games from today
   )
 
-gambletron_diagnostics$nba_today_count <- nrow(nba_today)
-gambletron_diagnostics$nba_today_data <- nba_today
 
 # --- 6. Process and Join Scraped Data ---
 if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
@@ -461,10 +447,6 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
                       ((prob_1_normalized == 1 & prob_2_normalized == 0) |
                        (prob_1_normalized == 0 & prob_2_normalized == 1)))
     )
-  
-  gambletron_diagnostics$suspicious_finished_games <- nba_today_validated %>%
-    filter(is_suspicious == TRUE) %>%
-    select(team_1, team_2, status, game_date, prob_1_normalized, prob_2_normalized)
   
   # Create one row per team with standardized names
   live_data_team1 <- nba_today_validated %>%
@@ -533,7 +515,6 @@ if (nrow(nba_today) > 0 && nrow(todays_picks) > 0) {
     ungroup() %>%
     select(Team, live_win_prob, status)
   
-  gambletron_diagnostics$live_data_final <- live_data_final
   
   # Join with todays_picks
   todays_picks <- todays_picks %>%
@@ -1681,43 +1662,6 @@ if (file.exists(yesterday_file)) {
 }
 ```
 
-```{r yesterday_diagnostics}
-#| echo: false
-#| message: false
-#| warning: false
-#| results: 'asis'
-
-cat("\n\n### Yesterday's Results Diagnostics\n\n")
-
-cat("- **Yesterday date:** ", as.character(yesterday_ct), "\n")
-cat("- **Yesterday file path:** ", file.path(history_dir, paste0(yesterday_ct, ".csv")), "\n")
-cat("- **Yesterday file exists:** ", file.exists(file.path(history_dir, paste0(yesterday_ct, ".csv"))), "\n")
-
-if (file.exists(file.path(history_dir, paste0(yesterday_ct, ".csv")))) {
-  ydiag <- read_csv(file.path(history_dir, paste0(yesterday_ct, ".csv")), show_col_types = FALSE)
-  cat("- **Rows in yesterday CSV:** ", nrow(ydiag), "\n")
-  cat("- **Columns in yesterday CSV:** ", paste(names(ydiag), collapse = ", "), "\n")
-  cat("- **Has Final_Score column:** ", "Final_Score" %in% names(ydiag), "\n")
-  cat("- **Has Scraped_Score column (from join):** Only present after join with scrape lookup\n")
-  
-  # Try scraping yesterday's plaintextsports page
-  tryCatch({
-    ydiag_url <- paste0("https://plaintextsports.com/nba/", yesterday_ct, "/")
-    ydiag_page <- read_html(ydiag_url)
-    ydiag_text <- ydiag_page %>% html_element("body") %>% html_text2()
-    ydiag_lines <- strsplit(ydiag_text, "\n")[[1]]
-    ydiag_boxes <- ydiag_lines[grepl("^\\+", ydiag_lines)]
-    cat("- **Game boxes scraped from plaintextsports:** ", length(ydiag_boxes), "\n")
-    if (length(ydiag_boxes) > 0) {
-      cat("- **First box (raw):** `", ydiag_boxes[1], "`\n")
-    }
-  }, error = function(e) {
-    cat("- **Scrape error:** ", as.character(e), "\n")
-  })
-} else {
-  cat("- **ERROR:** Yesterday's CSV not found — this is why the table is missing.\n")
-}
-```
 
 ---
 
@@ -2073,69 +2017,3 @@ p2 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Expected, color = Player, 
 print(p2)
 ```
 
----
-
-## Diagnostics: 
-
-```{r diagnostics}
-#| echo: false
-#| results: 'asis'
-
-cat("\n\n# 🛠️ Deep Diagnostics: Missing Table & YTD Check\n\n")
-
-cat("### 1. Date Calculations\n\n")
-cat("- **Current System Time:** ", as.character(Sys.time()), "\n")
-cat("- **Calculated 'Today' (Skins Date):** ", as.character(today_ct), "\n")
-cat("- **Calculated 'Yesterday':** ", as.character(yesterday_ct), "\n")
-
-cat("\n### 2. File Check for Yesterday\n\n")
-target_file <- file.path(history_dir, paste0(yesterday_ct, ".csv"))
-cat("- **Looking for file:** ", target_file, "\n")
-file_exists <- file.exists(target_file)
-cat("- **File exists?** ", file_exists, "\n")
-
-if(file_exists) {
-  df <- read_csv(target_file, show_col_types = FALSE)
-  cat("- **Rows in CSV:** ", nrow(df), "\n\n")
-  cat("**First 5 rows of yesterday's data:**\n")
-  print(knitr::kable(head(df, 5), format = "html") %>% kable_styling(bootstrap_options = "condensed"))
-} else {
-  cat("**ERROR:** Yesterday's CSV file was not found. This is why the table is missing.\n")
-}
-
-cat("\n### 3. YTD Inclusion Check\n\n")
-cat("- **Baseline Date:** ", as.character(baseline_date), "\n")
-cat("- **Condition for inclusion:** File Date >= Baseline Date\n")
-cat("- **Is Yesterday >= Baseline?** ", yesterday_ct >= baseline_date, "\n")
-
-# List files that qualify
-all_files <- list.files(history_dir, pattern = "^\\d{4}-\\d{2}-\\d{2}\\.csv$", full.names = TRUE)
-valid_files <- all_files[sapply(all_files, function(f) {
-  file_date <- as_date(str_extract(basename(f), "\\d{4}-\\d{2}-\\d{2}"))
-  return(!is.na(file_date) && file_date >= baseline_date)
-})]
-
-cat("- **Total files included in YTD:** ", length(valid_files), "\n")
-cat("- **Is yesterday's file in this list?** ", target_file %in% valid_files, "\n")
-
-cat("\n### 4. Scraping Simulation (Yesterday)\n\n")
-cat("Attempting to scrape yesterday's results page to see if matchups can be found.\n")
-test_url <- paste0("[https://plaintextsports.com/nba/](https://plaintextsports.com/nba/)", yesterday_ct, "/")
-cat("- **URL:** ", test_url, "\n")
-
-tryCatch({
-  page_test <- read_html(test_url)
-  text_test <- page_test %>% html_element("body") %>% html_text2()
-  lines_test <- strsplit(text_test, "\n")[[1]]
-  boxes_test <- lines_test[grepl("^\\+", lines_test)]
-  cat("- **Game Boxes Found:** ", length(boxes_test), "\n")
-  
-  if(length(boxes_test) == 0) {
-    cat("**CRITICAL ISSUE:** The scraper found 0 games for yesterday. This causes the join to fail, resulting in an empty table even if the CSV exists.\n")
-  } else {
-    cat("**Scrape Successful.** The issue might be in matching team abbreviations.\n")
-  }
-}, error = function(e) {
-  cat("**SCRAPE ERROR:** ", as.character(e), "\n")
-})
-```
