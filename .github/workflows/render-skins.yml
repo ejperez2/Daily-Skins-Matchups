@@ -1,11 +1,11 @@
 name: Render and Publish Skins Page
 
 on:
-  schedule:
+#  schedule:
     # 5:00 PM – 11:40 PM CST (Every 20 mins) -> 23:00 – 05:40 UTC
-    - cron: '*/20 23,0-5 * * *'
+ #   - cron: '*/20 23,0-5 * * *'
     # Midnight – 4:00 PM CST (Hourly) -> 06:00 – 22:00 UTC
-    - cron: '0 6-22 * * *'
+#    - cron: '0 6-22 * * *'
   
   workflow_dispatch:
 
