@@ -81,6 +81,8 @@ current_year <- year(today_ct)
 use_csv_for_sportsline <- current_hour_ct >= 23 | current_hour_ct < 2
 
 # Define draft_data (needs to be available for both branches)
+# TODO 2026-27: Replace with this season's draft results (still 2025-26 picks)
+# Must match draft_data in skins-standings/index.qmd
 draft_data <- tribble(
   ~Team, ~Matchup_Key, ~abbr, ~skins_pick, ~player,
   "Utah Jazz", "Jazz|Utah", "UTA", "L", "Eristeo",
@@ -1675,27 +1677,27 @@ if (file.exists(yesterday_file)) {
 # Create/update historical baseline data
 historical_file <- file.path(history_dir, "ytd_baseline.csv")
 
-# CORRECTED: Nov 4 baseline data (includes Oct 24 - Nov 4)
-# These are the correct cumulative values through Nov 4
+# 2026-27 SEASON: Fresh start. Baseline is all zeros; every daily CSV from
+# opening night (Oct 20, 2026) onward is added on top of it.
+# (2025-26 daily files are archived in archive/2025-26/skins_history/)
 ytd_baseline <- tribble(
   ~Player, ~Games, ~Total_Expected_Skins, ~Total_Actual_Skins, ~Cumulative_Skins_Luck,
-  "Adam", 38, 24.2, 24, -0.2,
-  "Eristeo", 35, 24.6, 23, -1.6,
-  "Kenneth", 37, 24.1, 18, -6.1,
-  "Brian", 38, 23.6, 25, 1.4,
-  "Thomas", 34, 23.3, 16, -7.3,
-  "Matt", 36, 26.0, 26, 0.0
+  "Adam", 0, 0, 0, 0,
+  "Eristeo", 0, 0, 0, 0,
+  "Kenneth", 0, 0, 0, 0,
+  "Brian", 0, 0, 0, 0,
+  "Thomas", 0, 0, 0, 0,
+  "Matt", 0, 0, 0, 0
 )
 
 # Save/overwrite the baseline file
 write_csv(ytd_baseline, historical_file)
 
 # CRITICAL FIX: Only write baseline_date.txt if it doesn't exist
-# Set it to Nov 5 so that only Nov 5+ data gets added on top of the baseline
+# Baseline date = 2026-27 opening night, so only this season's daily files count
 baseline_date_file <- file.path(history_dir, "baseline_date.txt")
 if (!file.exists(baseline_date_file)) {
-  # Set baseline date to Nov 5 - baseline includes everything through Nov 4
-  writeLines("2025-11-05", baseline_date_file)
+  writeLines("2026-10-20", baseline_date_file)
 }
 baseline_date <- as_date(readLines(baseline_date_file)[1])
 ```
