@@ -11,8 +11,8 @@
   `baseline_date.txt` is now always written from `SEASON_START` (the old Nov 5, 2025 baseline is gone).
 - **Archive:** 2025-26 daily files (6-player league) moved to `skins_history/archive/2025-26/`, which the
   season-to-date and yesterday lookups do not read.
-- **Perfect Skins %:** Still requires at least 5 games that day. With 10-team rosters, a player having both
-  teams in a game (self zero-sum, which makes Perfect Skins 0%) will be much more common.
+- **Perfect Skins %:** Requires all 10 of a player's teams to play that day (and no self zero-sum game),
+  so a perfect day means 10 skins in one day.
 
 Sections below describe the 2025-26 (6-player) setup unless noted.
 

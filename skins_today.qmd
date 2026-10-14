@@ -82,6 +82,7 @@ use_csv_for_sportsline <- current_hour_ct >= 23 | current_hour_ct < 2
 
 # League configuration (2026-27: 3 players x 10 teams each)
 PLAYERS <- c("Eristeo", "Brian", "Adam")
+TEAMS_PER_PLAYER <- 30 / length(PLAYERS)
 SEASON_LABEL <- "2026-27"
 SEASON_START <- as_date("2026-10-20")  # Opening night; YTD stats count from here
 
@@ -766,8 +767,8 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
       `Perfect Skins %` = case_when(
         # If player has self zero-sum matchup, 0%
         Player %in% self_zero_sum_players ~ 0,
-        # If player has less than 5 games, 0% (kept at 5 for 10-team rosters)
-        num_games < 5 ~ 0,
+        # A perfect day needs every one of the player's teams to play (10 games), else 0%
+        num_games < TEAMS_PER_PLAYER ~ 0,
         # Otherwise, multiply live expected skins probabilities and convert to %
         TRUE ~ perfect_prob * 100
       )
