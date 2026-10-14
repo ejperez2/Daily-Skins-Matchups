@@ -80,40 +80,54 @@ current_year <- year(today_ct)
 # Define blackout window: 11 PM (23:00) to 1:59 AM
 use_csv_for_sportsline <- current_hour_ct >= 23 | current_hour_ct < 2
 
+# League configuration (2026-27: 3 players x 10 teams each)
+PLAYERS <- c("Eristeo", "Brian", "Adam")
+SEASON_LABEL <- "2026-27"
+SEASON_START <- as_date("2026-10-20")  # Opening night; YTD stats count from here
+
 # Define draft_data (needs to be available for both branches)
+# DRAFT: Sunday, October 18, 2026. After the draft, fill in skins_pick ("W"/"L") and
+# player ("Eristeo"/"Brian"/"Adam") for every team. Undrafted teams are ignored.
 draft_data <- tribble(
   ~Team, ~Matchup_Key, ~abbr, ~skins_pick, ~player,
-  "Utah Jazz", "Jazz|Utah", "UTA", "L", "Eristeo",
-  "Oklahoma City Thunder", "Thunder|Oklahoma", "OKC", "W", "Matt",
-  "Washington Wizards", "Wizards|Washington", "WAS", "L", "Brian",
-  "Brooklyn Nets", "Nets|Brooklyn", "BKN", "L", "Adam",
-  "Cleveland Cavaliers", "Cavaliers|Cleveland", "CLE", "W", "Thomas",
-  "Charlotte Hornets", "Hornets|Charlotte", "CHA", "L", "Brian",
-  "Denver Nuggets", "Nuggets|Denver", "DEN", "W", "Thomas",
-  "New York Knicks", "Knicks|New York", "NYK", "W", "Adam",
-  "Houston Rockets", "Rockets|Houston", "HOU", "W", "Kenneth",
-  "Phoenix Suns", "Suns|Phoenix", "PHX", "L", "Eristeo",
-  "New Orleans Pelicans", "Pelicans|New Orleans", "NOP", "L", "Matt",
-  "Orlando Magic", "Magic|Orlando", "ORL", "W", "Kenneth",
-  "Chicago Bulls", "Bulls|Chicago", "CHI", "L", "Thomas",
-  "Los Angeles Clippers", "Clippers|LA Clippers", "LAC", "W", "Eristeo",
-  "Minnesota Timberwolves", "Timberwolves|Minnesota", "MIN", "W", "Matt",
-  "Portland Trail Blazers", "Trail Blazers|Portland", "POR", "L", "Kenneth",
-  "Atlanta Hawks", "Hawks|Atlanta", "ATL", "W", "Adam",
-  "Los Angeles Lakers", "Lakers|LA Lakers", "LAL", "W", "Adam",
-  "Golden State Warriors", "Warriors|Golden State", "GSW", "W", "Kenneth",
-  "Sacramento Kings", "Kings|Sacramento", "SAC", "L", "Thomas",
-  "Detroit Pistons", "Pistons|Detroit", "DET", "W", "Brian",
-  "Indiana Pacers", "Pacers|Indiana", "IND", "L", "Eristeo",
-  "Miami Heat", "Heat|Miami", "MIA", "L", "Matt",
-  "Philadelphia 76ers", "76ers|Philadelphia", "PHI", "W", "Matt",
-  "Toronto Raptors", "Raptors|Toronto", "TOR", "L", "Brian",
-  "Milwaukee Bucks", "Bucks|Milwaukee", "MIL", "W", "Brian",
-  "San Antonio Spurs", "Spurs|San Antonio", "SAS", "W", "Eristeo",
-  "Memphis Grizzlies", "Grizzlies|Memphis", "MEM", "W", "Kenneth",
-  "Boston Celtics", "Celtics|Boston", "BOS", "W", "Adam",
-  "Dallas Mavericks", "Mavericks|Dallas", "DAL", "W", "Thomas"
+  "Atlanta Hawks",          "Hawks|Atlanta",          "ATL", NA_character_, NA_character_,
+  "Boston Celtics",         "Celtics|Boston",         "BOS", NA_character_, NA_character_,
+  "Brooklyn Nets",          "Nets|Brooklyn",          "BKN", NA_character_, NA_character_,
+  "Charlotte Hornets",      "Hornets|Charlotte",      "CHA", NA_character_, NA_character_,
+  "Chicago Bulls",          "Bulls|Chicago",          "CHI", NA_character_, NA_character_,
+  "Cleveland Cavaliers",    "Cavaliers|Cleveland",    "CLE", NA_character_, NA_character_,
+  "Dallas Mavericks",       "Mavericks|Dallas",       "DAL", NA_character_, NA_character_,
+  "Denver Nuggets",         "Nuggets|Denver",         "DEN", NA_character_, NA_character_,
+  "Detroit Pistons",        "Pistons|Detroit",        "DET", NA_character_, NA_character_,
+  "Golden State Warriors",  "Warriors|Golden State",  "GSW", NA_character_, NA_character_,
+  "Houston Rockets",        "Rockets|Houston",        "HOU", NA_character_, NA_character_,
+  "Indiana Pacers",         "Pacers|Indiana",         "IND", NA_character_, NA_character_,
+  "Los Angeles Clippers",   "Clippers|LA Clippers",   "LAC", NA_character_, NA_character_,
+  "Los Angeles Lakers",     "Lakers|LA Lakers",       "LAL", NA_character_, NA_character_,
+  "Memphis Grizzlies",      "Grizzlies|Memphis",      "MEM", NA_character_, NA_character_,
+  "Miami Heat",             "Heat|Miami",             "MIA", NA_character_, NA_character_,
+  "Milwaukee Bucks",        "Bucks|Milwaukee",        "MIL", NA_character_, NA_character_,
+  "Minnesota Timberwolves", "Timberwolves|Minnesota", "MIN", NA_character_, NA_character_,
+  "New Orleans Pelicans",   "Pelicans|New Orleans",   "NOP", NA_character_, NA_character_,
+  "New York Knicks",        "Knicks|New York",        "NYK", NA_character_, NA_character_,
+  "Oklahoma City Thunder",  "Thunder|Oklahoma",       "OKC", NA_character_, NA_character_,
+  "Orlando Magic",          "Magic|Orlando",          "ORL", NA_character_, NA_character_,
+  "Philadelphia 76ers",     "76ers|Philadelphia",     "PHI", NA_character_, NA_character_,
+  "Phoenix Suns",           "Suns|Phoenix",           "PHX", NA_character_, NA_character_,
+  "Portland Trail Blazers", "Trail Blazers|Portland", "POR", NA_character_, NA_character_,
+  "Sacramento Kings",       "Kings|Sacramento",       "SAC", NA_character_, NA_character_,
+  "San Antonio Spurs",      "Spurs|San Antonio",      "SAS", NA_character_, NA_character_,
+  "Toronto Raptors",        "Raptors|Toronto",        "TOR", NA_character_, NA_character_,
+  "Utah Jazz",              "Jazz|Utah",              "UTA", NA_character_, NA_character_,
+  "Washington Wizards",     "Wizards|Washington",     "WAS", NA_character_, NA_character_
 )
+
+unknown_players <- setdiff(na.omit(draft_data$player), PLAYERS)
+if (length(unknown_players) > 0) {
+  stop("draft_data has players not in PLAYERS: ", paste(unknown_players, collapse = ", "))
+}
+# Only drafted teams count for skins
+drafted_teams <- draft_data %>% filter(!is.na(player), skins_pick %in% c("W", "L"))
 
 # --- Part 1: Get Data (Conditional) ---
 if (use_csv_for_sportsline) {
@@ -235,7 +249,7 @@ if (!use_csv_for_sportsline) {
       prob_no_vig = implied_prob / total_prob_in_game
     ) %>%
     ungroup() %>%
-    left_join(draft_data, by = "Matchup_Key") %>%
+    left_join(drafted_teams, by = "Matchup_Key") %>%
     filter(!is.na(Team)) %>%
     mutate(
       expected_skins = if_else(skins_pick == "W", prob_no_vig, 1 - prob_no_vig),
@@ -752,7 +766,7 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
       `Perfect Skins %` = case_when(
         # If player has self zero-sum matchup, 0%
         Player %in% self_zero_sum_players ~ 0,
-        # If player has less than 5 games, 0%
+        # If player has less than 5 games, 0% (kept at 5 for 10-team rosters)
         num_games < 5 ~ 0,
         # Otherwise, multiply live expected skins probabilities and convert to %
         TRUE ~ perfect_prob * 100
@@ -1665,7 +1679,7 @@ if (file.exists(yesterday_file)) {
 
 ---
 
-## Year-to-Date Cumulative Stats
+## Season-to-Date Cumulative Stats
 
 ```{r ytd_setup}
 #| echo: false
@@ -1675,29 +1689,22 @@ if (file.exists(yesterday_file)) {
 # Create/update historical baseline data
 historical_file <- file.path(history_dir, "ytd_baseline.csv")
 
-# CORRECTED: Nov 4 baseline data (includes Oct 24 - Nov 4)
-# These are the correct cumulative values through Nov 4
-ytd_baseline <- tribble(
-  ~Player, ~Games, ~Total_Expected_Skins, ~Total_Actual_Skins, ~Cumulative_Skins_Luck,
-  "Adam", 38, 24.2, 24, -0.2,
-  "Eristeo", 35, 24.6, 23, -1.6,
-  "Kenneth", 37, 24.1, 18, -6.1,
-  "Brian", 38, 23.6, 25, 1.4,
-  "Thomas", 34, 23.3, 16, -7.3,
-  "Matt", 36, 26.0, 26, 0.0
+# New season: everyone starts at zero on opening night and every daily CSV from
+# SEASON_START onward is added on top. (2025-26 daily files are archived in skins_history/archive/2025-26/)
+ytd_baseline <- tibble(
+  Player = PLAYERS,
+  Games = 0,
+  Total_Expected_Skins = 0,
+  Total_Actual_Skins = 0,
+  Cumulative_Skins_Luck = 0
 )
 
 # Save/overwrite the baseline file
 write_csv(ytd_baseline, historical_file)
 
-# CRITICAL FIX: Only write baseline_date.txt if it doesn't exist
-# Set it to Nov 5 so that only Nov 5+ data gets added on top of the baseline
 baseline_date_file <- file.path(history_dir, "baseline_date.txt")
-if (!file.exists(baseline_date_file)) {
-  # Set baseline date to Nov 5 - baseline includes everything through Nov 4
-  writeLines("2025-11-05", baseline_date_file)
-}
-baseline_date <- as_date(readLines(baseline_date_file)[1])
+writeLines(as.character(SEASON_START), baseline_date_file)
+baseline_date <- SEASON_START
 ```
 
 ```{r ytd_cumulative}
@@ -1826,7 +1833,7 @@ if (nrow(ytd_data) > 0) {
     select(Player, `Cumulative Skins Luck` = `Cumulative Skins Luck Display`, Games, 
            `Total Expected Skins`, `Total Actual Skins`, `Expected Skins %`)
   
-  knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats"), escape = FALSE, format = "html") %>%
+  knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(SEASON_LABEL, " Season-to-Date Cumulative Stats"), escape = FALSE, format = "html") %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
     column_spec(2, bold = TRUE) %>%
     row_spec(nrow(ytd_summary_with_total), bold = TRUE, background = "#444444")
@@ -1909,7 +1916,7 @@ if (nrow(ytd_data) > 0) {
     select(Player, `Cumulative Skins Luck` = `Cumulative Skins Luck Display`, Games, 
            `Total Expected Skins`, `Total Actual Skins`, `Expected Skins %`)
     
-  knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(year(today_ct), " Year-to-Date Cumulative Stats (Baseline)"), escape = FALSE, format = "html") %>%
+  knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(SEASON_LABEL, " Season-to-Date Cumulative Stats (Baseline)"), escape = FALSE, format = "html") %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
     column_spec(2, bold = TRUE) %>%
     row_spec(nrow(ytd_summary_with_total), bold = TRUE, background = "#444444")
