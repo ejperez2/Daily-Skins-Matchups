@@ -1,5 +1,21 @@
 # 📚 NBA Skins Project - Complete Documentation Index & Guide
 
+## 🆕 2026-27 Season: Three-Player League
+
+- **Players:** Eristeo, Brian, Adam (configured once in `PLAYERS` near the top of `skins_today.qmd`)
+- **Rosters:** 10 teams each (all 30 teams drafted)
+- **Draft:** Sunday, October 18, 2026 · **Opening night:** Tuesday, October 20, 2026 (`SEASON_START`)
+- **Draft data:** `draft_data` lists all 30 teams with blank `skins_pick` / `player`. Fill both in after the draft.
+  Undrafted teams are ignored, so the page renders fine before the draft (no picks, zero baseline).
+- **Season-to-date stats:** Start from zero on `SEASON_START`; every daily CSV dated on or after it is added.
+  `baseline_date.txt` is now always written from `SEASON_START` (the old Nov 5, 2025 baseline is gone).
+- **Archive:** 2025-26 daily files (6-player league) moved to `skins_history/archive/2025-26/`, which the
+  season-to-date and yesterday lookups do not read.
+- **Perfect Skins %:** Requires all 10 of a player's teams to play that day (and no self zero-sum game),
+  so a perfect day means 10 skins in one day.
+
+Sections below describe the 2025-26 (6-player) setup unless noted.
+
 ## 🎯 Quick Start - Which Document Do You Need?
 
 ### 🚀 Starting a New Chat Session?
@@ -274,7 +290,7 @@
 ```r
 # Check baseline date
 baseline_date_file <- "skins_history/baseline_date.txt"
-readLines(baseline_date_file)  # Should be 2025-11-05
+readLines(baseline_date_file)  # Should be 2026-10-20 (SEASON_START)
 
 # Check for duplicates
 library(dplyr)
@@ -803,7 +819,7 @@ Date,Player,Team,Abbr,Pick,Expected_Skins,Won_Game,Actual_Skins,Skins_Luck,game_
 
 **Key Columns:**
 - `Date`: YYYY-MM-DD format
-- `Player`: Player name (Adam, Brian, Eristeo, Kenneth, Matt, Thomas)
+- `Player`: Player name (2026-27: Eristeo, Brian, Adam)
 - `Team`: Full team name
 - `Abbr`: 2-3 letter abbreviation (must match draft_data)
 - `Pick`: W or L
@@ -986,11 +1002,11 @@ check_system_health <- function() {
   # Check 2: Baseline date
   baseline_date <- as_date(readLines("skins_history/baseline_date.txt")[1])
   health_report$baseline_date <- baseline_date
-  health_report$baseline_current <- baseline_date == as_date("2025-11-05")
+  health_report$baseline_current <- baseline_date == as_date("2026-10-20")
   
   # Check 3: YTD data completeness
   ytd_baseline <- read_csv("skins_history/ytd_baseline.csv", show_col_types = FALSE)
-  health_report$all_players_in_baseline <- nrow(ytd_baseline) == 6
+  health_report$all_players_in_baseline <- nrow(ytd_baseline) == 3
   
   # NEW Check 4: Recent workflow runs
   health_report$expected_runs_per_day <- 72
