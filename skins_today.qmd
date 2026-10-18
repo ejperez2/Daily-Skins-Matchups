@@ -47,7 +47,7 @@ if (!dir.exists(history_dir)) {
 #| echo: false
 #| results: 'asis'
 ts <- format(Sys.time(), "%A, %B %d, %Y at %I:%M %p %Z", tz = "America/Chicago")
-cat(paste0("<p style='font-size:14px; color:#999;'><strong>Last updated:</strong> ", ts, "</p>"))
+cat(paste0("<p style='font-size:14px; color:#999;'><strong>Last updated:</strong> ", ts, " &middot; <a href='2025-26/'>2025-26 final page</a></p>"))
 ```
 
 ```{r expected_skins_data}
@@ -87,40 +87,40 @@ SEASON_LABEL <- "2026-27"
 SEASON_START <- as_date("2026-10-20")  # Opening night; YTD stats count from here
 
 # Define draft_data (needs to be available for both branches)
-# DRAFT: Sunday, October 18, 2026. After the draft, fill in skins_pick ("W"/"L") and
-# player ("Eristeo"/"Brian"/"Adam") for every team. Undrafted teams are ignored.
+# DRAFTED: Sunday, October 18, 2026 (10-round snake; order Adam, Brian, Eristeo).
+# Teams with no player/pick are ignored.
 draft_data <- tribble(
   ~Team, ~Matchup_Key, ~abbr, ~skins_pick, ~player,
-  "Atlanta Hawks",          "Hawks|Atlanta",          "ATL", NA_character_, NA_character_,
-  "Boston Celtics",         "Celtics|Boston",         "BOS", NA_character_, NA_character_,
-  "Brooklyn Nets",          "Nets|Brooklyn",          "BKN", NA_character_, NA_character_,
-  "Charlotte Hornets",      "Hornets|Charlotte",      "CHA", NA_character_, NA_character_,
-  "Chicago Bulls",          "Bulls|Chicago",          "CHI", NA_character_, NA_character_,
-  "Cleveland Cavaliers",    "Cavaliers|Cleveland",    "CLE", NA_character_, NA_character_,
-  "Dallas Mavericks",       "Mavericks|Dallas",       "DAL", NA_character_, NA_character_,
-  "Denver Nuggets",         "Nuggets|Denver",         "DEN", NA_character_, NA_character_,
-  "Detroit Pistons",        "Pistons|Detroit",        "DET", NA_character_, NA_character_,
-  "Golden State Warriors",  "Warriors|Golden State",  "GSW", NA_character_, NA_character_,
-  "Houston Rockets",        "Rockets|Houston",        "HOU", NA_character_, NA_character_,
-  "Indiana Pacers",         "Pacers|Indiana",         "IND", NA_character_, NA_character_,
-  "Los Angeles Clippers",   "Clippers|LA Clippers",   "LAC", NA_character_, NA_character_,
-  "Los Angeles Lakers",     "Lakers|LA Lakers",       "LAL", NA_character_, NA_character_,
-  "Memphis Grizzlies",      "Grizzlies|Memphis",      "MEM", NA_character_, NA_character_,
-  "Miami Heat",             "Heat|Miami",             "MIA", NA_character_, NA_character_,
-  "Milwaukee Bucks",        "Bucks|Milwaukee",        "MIL", NA_character_, NA_character_,
-  "Minnesota Timberwolves", "Timberwolves|Minnesota", "MIN", NA_character_, NA_character_,
-  "New Orleans Pelicans",   "Pelicans|New Orleans",   "NOP", NA_character_, NA_character_,
-  "New York Knicks",        "Knicks|New York",        "NYK", NA_character_, NA_character_,
-  "Oklahoma City Thunder",  "Thunder|Oklahoma",       "OKC", NA_character_, NA_character_,
-  "Orlando Magic",          "Magic|Orlando",          "ORL", NA_character_, NA_character_,
-  "Philadelphia 76ers",     "76ers|Philadelphia",     "PHI", NA_character_, NA_character_,
-  "Phoenix Suns",           "Suns|Phoenix",           "PHX", NA_character_, NA_character_,
-  "Portland Trail Blazers", "Trail Blazers|Portland", "POR", NA_character_, NA_character_,
-  "Sacramento Kings",       "Kings|Sacramento",       "SAC", NA_character_, NA_character_,
-  "San Antonio Spurs",      "Spurs|San Antonio",      "SAS", NA_character_, NA_character_,
-  "Toronto Raptors",        "Raptors|Toronto",        "TOR", NA_character_, NA_character_,
-  "Utah Jazz",              "Jazz|Utah",              "UTA", NA_character_, NA_character_,
-  "Washington Wizards",     "Wizards|Washington",     "WAS", NA_character_, NA_character_
+  "Atlanta Hawks",          "Hawks|Atlanta",          "ATL", "W", "Brian",
+  "Boston Celtics",         "Celtics|Boston",         "BOS", "W", "Adam",
+  "Brooklyn Nets",          "Nets|Brooklyn",          "BKN", "L", "Eristeo",
+  "Charlotte Hornets",      "Hornets|Charlotte",      "CHA", "L", "Eristeo",
+  "Chicago Bulls",          "Bulls|Chicago",          "CHI", "L", "Eristeo",
+  "Cleveland Cavaliers",    "Cavaliers|Cleveland",    "CLE", "W", "Eristeo",
+  "Dallas Mavericks",       "Mavericks|Dallas",       "DAL", "L", "Brian",
+  "Denver Nuggets",         "Nuggets|Denver",         "DEN", "W", "Adam",
+  "Detroit Pistons",        "Pistons|Detroit",        "DET", "W", "Eristeo",
+  "Golden State Warriors",  "Warriors|Golden State",  "GSW", "L", "Brian",
+  "Houston Rockets",        "Rockets|Houston",        "HOU", "W", "Adam",
+  "Indiana Pacers",         "Pacers|Indiana",         "IND", "W", "Brian",
+  "Los Angeles Clippers",   "Clippers|LA Clippers",   "LAC", "L", "Brian",
+  "Los Angeles Lakers",     "Lakers|LA Lakers",       "LAL", "W", "Eristeo",
+  "Memphis Grizzlies",      "Grizzlies|Memphis",      "MEM", "L", "Eristeo",
+  "Miami Heat",             "Heat|Miami",             "MIA", "W", "Adam",
+  "Milwaukee Bucks",        "Bucks|Milwaukee",        "MIL", "L", "Brian",
+  "Minnesota Timberwolves", "Timberwolves|Minnesota", "MIN", "W", "Adam",
+  "New Orleans Pelicans",   "Pelicans|New Orleans",   "NOP", "L", "Eristeo",
+  "New York Knicks",        "Knicks|New York",        "NYK", "W", "Brian",
+  "Oklahoma City Thunder",  "Thunder|Oklahoma",       "OKC", "W", "Adam",
+  "Orlando Magic",          "Magic|Orlando",          "ORL", "L", "Brian",
+  "Philadelphia 76ers",     "76ers|Philadelphia",     "PHI", "W", "Adam",
+  "Phoenix Suns",           "Suns|Phoenix",           "PHX", "L", "Adam",
+  "Portland Trail Blazers", "Trail Blazers|Portland", "POR", "L", "Adam",
+  "Sacramento Kings",       "Kings|Sacramento",       "SAC", "L", "Eristeo",
+  "San Antonio Spurs",      "Spurs|San Antonio",      "SAS", "W", "Brian",
+  "Toronto Raptors",        "Raptors|Toronto",        "TOR", "W", "Adam",
+  "Utah Jazz",              "Jazz|Utah",              "UTA", "L", "Eristeo",
+  "Washington Wizards",     "Wizards|Washington",     "WAS", "L", "Brian"
 )
 
 unknown_players <- setdiff(na.omit(draft_data$player), PLAYERS)
