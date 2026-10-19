@@ -14,6 +14,10 @@
 - **Perfect Skins %:** Requires all 10 of a player's teams to play that day (and no self zero-sum game),
   so a perfect day means 10 skins in one day.
 
+- **Update schedule (Central):** every 20 minutes 6:00 PM - 12:40 AM, plus 6 AM, 9 AM, 12 PM and 3 PM.
+  The workflow has CDT and CST cron lines; a `gate` job runs only the one matching Chicago's current offset.
+- **Navigation:** both pages (and the 2025-26 archives) link to each other at the top.
+
 Sections below describe the 2025-26 (6-player) setup unless noted.
 
 ## 🎯 Quick Start - Which Document Do You Need?

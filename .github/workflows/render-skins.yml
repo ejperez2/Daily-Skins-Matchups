@@ -1,11 +1,12 @@
 name: Render and Publish Skins Page
 
 on:
+  # Central time: every 20 min 6:00 PM - 12:40 AM (game time), plus 6 AM, 9 AM, 12 PM, 3 PM
   schedule:
-    # 5:00 PM – 11:40 PM CST (Every 20 mins) -> 23:00 – 05:40 UTC
-    - cron: '*/20 23,0-5 * * *'
-    # Midnight – 4:00 PM CST (Hourly) -> 06:00 – 22:00 UTC
-    - cron: '0 6-22 * * *'
+    - cron: '*/20 23,0-5 * * *'         # CDT (UTC-5) game time
+    - cron: '0 11,14,17,20 * * *'       # CDT (UTC-5) daytime
+    - cron: '*/20 0-6 * * *'            # CST (UTC-6) game time
+    - cron: '0 12,15,18,21 * * *'       # CST (UTC-6) daytime
 
   workflow_dispatch:
 
@@ -15,7 +16,32 @@ permissions:
   id-token: write
 
 jobs:
+  # GitHub schedules run on UTC; Chicago is UTC-5 (CDT) or UTC-6 (CST). Each Central time has a CDT
+  # and a CST cron line above - this job lets through only the one that matches today's clock.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        env:
+          EVENT: ${{ github.event_name }}
+          CRON: ${{ github.event.schedule }}
+        run: |
+          run=true
+          zone=$(TZ=America/Chicago date +%Z)
+          if [ "$EVENT" = "schedule" ]; then
+            case "$CRON" in
+              "*/20 23,0-5 * * *" | "0 11,14,17,20 * * *") [ "$zone" = "CDT" ] || run=false ;;
+              "*/20 0-6 * * *" | "0 12,15,18,21 * * *") [ "$zone" = "CST" ] || run=false ;;
+            esac
+          fi
+          echo "event=$EVENT cron='$CRON' chicago=$zone -> run=$run"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
   build-and-deploy:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
