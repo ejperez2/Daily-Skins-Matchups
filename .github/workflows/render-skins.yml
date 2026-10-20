@@ -43,6 +43,10 @@ jobs:
     needs: gate
     if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
+    # One render at a time, so a manual refresh during a scheduled run waits instead of racing it
+    concurrency:
+      group: render-skins
+      cancel-in-progress: false
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
