@@ -176,7 +176,8 @@ if (!use_csv_for_sportsline) {
   # Extract correct columns and clean team names
   game_data <- data.frame(
     Matchup_raw = game_data_raw[[1]],
-    consensus = game_data_raw[[3]],
+    # Look up by header: SportsLine adds/moves columns (e.g. "Proj Score")
+    consensus = game_data_raw[[which(tolower(names(game_data_raw)) == "consensus")[1]]],
     stringsAsFactors = FALSE
   ) %>%
     mutate(
@@ -217,10 +218,13 @@ if (!use_csv_for_sportsline) {
     filter(!is.na(Matchup) & Matchup != "") %>%
     mutate(
       row_id = row_number(),
-      game_time_str = str_extract(Matchup_raw, 
-        "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+\\d+,\\s+\\d+:\\d+\\s*[AP]M\\s+UTC")
+      # Day header rows ("Today, Oct 20", "Thursday, Oct 22") come BEFORE their games
+      game_day_str = str_match(Matchup_raw,
+        "^\\s*[A-Za-z]+,\\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+\\d{1,2})\\s*$")[, 2],
+      # Tip-off rows ("Advanced Insights 7:00PM ET on NBC") come AFTER their two team rows
+      game_time_str = str_extract(Matchup_raw, "\\d{1,2}:\\d{2}\\s*[AP]M(?=\\s*ET)")
     ) %>%
-    # Fill UP because date rows come AFTER team rows
+    fill(game_day_str, .direction = "down") %>%
     fill(game_time_str, .direction = "up") %>%
     # Filter out the "Expert Picks" and "Advanced Insights" rows
     filter(!str_detect(Matchup, "Expert Picks|Advanced Insights")) %>%
@@ -228,13 +232,12 @@ if (!use_csv_for_sportsline) {
     filter(str_detect(consensus, "[+-]\\d+")) %>%
     mutate(
       Matchup_Key = vapply(Matchup, match_team, draft_data = draft_data, FUN.VALUE = character(1)),
-      game_time_str_with_year = paste(game_time_str, current_year),
-      game_time_utc = parse_date_time(
-        str_remove(game_time_str_with_year, "\\s+UTC"),
-        orders = c("b d, I:M p Y"),
-        tz = "UTC"
+      game_time_et = parse_date_time(
+        paste(game_day_str, current_year, game_time_str),
+        orders = c("b d Y I:M p"),
+        tz = "America/New_York"
       ),
-      game_time_ct = with_tz(game_time_utc, tzone = "America/Chicago"),
+      game_time_ct = with_tz(game_time_et, tzone = "America/Chicago"),
       game_date_ct = as_date(game_time_ct),
       # Create game_id: every 2 consecutive rows are a game
       game_id = paste0(game_date_ct, "_", ceiling(row_number() / 2))
