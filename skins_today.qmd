@@ -1,12 +1,73 @@
 ---
 title: "Today's Skins"
-# VERSION: 2024-11-20-v2 (Show game times in CT for upcoming games; blank scores for upcoming games)
+# VERSION: 2026-10-21 (Mobile scoreboard: game cards, "I'm" picker, compact summary, collapsible history)
 format:
   html:
     self-contained: true
+    include-in-header:
+      text: |
+        <style>
+        :root {
+          --sk-surface: #2b2b2b; --sk-line: #444; --sk-muted: #aaa; --sk-accent: #f2a541;
+          --sk-mine: #3a3121; --sk-good: #6fd497; --sk-good-bg: #173726; --sk-bad: #ff8a92; --sk-bad-bg: #3d1d21; --sk-bar: #444;
+        }
+        table { width: auto !important; margin-left: auto; margin-right: auto; }
+        .sk-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 15px; margin: 0 0 6px 0; padding: 6px 0; border-bottom: 1px solid rgba(128,128,128,0.35); }
+        .sk-btn { font-size: 13px; padding: 2px 10px; cursor: pointer; color: inherit; background: transparent; border: 1px solid rgba(128,128,128,0.6); border-radius: 4px; }
+        .sk-meta { font-size: 14px; color: #999; margin: 0; }
+        .sk-who { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; color: var(--sk-muted); margin: 12px 0; }
+        .sk-seg { display: inline-flex; border: 1px solid var(--sk-line); border-radius: 8px; overflow: hidden; }
+        .sk-seg button { font: inherit; font-size: 14px; color: inherit; background: transparent; border: 0; padding: 5px 12px; cursor: pointer; }
+        .sk-seg button + button { border-left: 1px solid var(--sk-line); }
+        .sk-seg button[aria-pressed="true"] { background: var(--sk-accent); color: #1b1b1b; font-weight: 600; }
+        .sk-myday { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 16px 0; }
+        .sk-myday > div { background: var(--sk-surface); border: 1px solid var(--sk-line); border-radius: 8px; padding: 8px 10px; }
+        .sk-myday .k { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--sk-muted); }
+        .sk-myday .v { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .sk-h { font-size: 15px; text-transform: uppercase; letter-spacing: .08em; color: var(--sk-muted); margin: 20px 0 8px 0; font-weight: 700; }
+        .sk-games { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 10px; }
+        .sk-card { background: var(--sk-surface); border: 1px solid var(--sk-line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+        .sk-card.mine { background: var(--sk-mine); border-color: var(--sk-accent); }
+        .sk-card .top { display: flex; justify-content: space-between; font-size: 13px; color: var(--sk-muted); font-variant-numeric: tabular-nums; }
+        .sk-card .top .live { color: var(--sk-bad); font-weight: 600; }
+        .sk-card .top .live::before { content: "\25CF  "; }
+        .sk-card .top .final { color: inherit; font-weight: 600; }
+        .sk-card .side { display: grid; grid-template-columns: 44px 1fr auto 48px; align-items: center; gap: 4px 10px; }
+        .sk-card .abbr { font-weight: 700; font-size: 20px; }
+        .sk-card .owner { font-size: 15px; display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+        .sk-card .owner .pick { font-size: 11px; color: var(--sk-muted); border: 1px solid var(--sk-line); border-radius: 4px; padding: 0 4px; }
+        .sk-card .side.me .owner { font-weight: 700; }
+        .sk-card .side.won .name { background: var(--sk-good-bg); color: var(--sk-good); border-radius: 4px; padding: 0 5px; }
+        .sk-card .side.lost { opacity: .55; }
+        .sk-card .score { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+        .sk-card .pct { font-size: 18px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+        .sk-card .barrow { grid-column: 2 / 4; height: 6px; background: var(--sk-bar); border-radius: 3px; overflow: hidden; }
+        .sk-card .barrow span { display: block; height: 100%; background: var(--sk-muted); border-radius: 3px; }
+        .sk-card .side.me .barrow span { background: var(--sk-accent); }
+        .sk-card .side.won .barrow span { background: var(--sk-good); }
+        .sk-card .foot { font-size: 12px; color: var(--sk-muted); border-top: 1px solid var(--sk-line); padding-top: 6px; }
+        .sk-tablewrap { overflow-x: auto; background: var(--sk-surface); border: 1px solid var(--sk-line); border-radius: 10px; }
+        table.sk-table { width: 100% !important; margin: 0; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 15px; }
+        .sk-table th, .sk-table td { padding: 8px 10px; text-align: right; white-space: nowrap; }
+        .sk-table th:first-child, .sk-table td:first-child { text-align: left; }
+        .sk-table th { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--sk-muted); font-weight: 600; border-bottom: 1px solid var(--sk-line); }
+        .sk-table tr + tr td { border-top: 1px solid var(--sk-line); }
+        .sk-table tr.me td { background: var(--sk-mine); font-weight: 700; }
+        .sk-pill { border-radius: 4px; padding: 1px 6px; }
+        .sk-pill.pos { background: var(--sk-good-bg); color: var(--sk-good); }
+        .sk-pill.neg { background: var(--sk-bad-bg); color: var(--sk-bad); }
+        .sk-note { font-size: 12px; color: var(--sk-muted); margin: 6px 0 0 0; }
+        details.sk-fold { background: var(--sk-surface); border: 1px solid var(--sk-line); border-radius: 10px; margin: 16px 0 0 0; }
+        details.sk-fold > summary { cursor: pointer; padding: 10px 12px; font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--sk-muted); }
+        details.sk-fold[open] > summary { border-bottom: 1px solid var(--sk-line); }
+        details.sk-fold > .sk-inner { padding: 10px 12px; }
+        details.sk-fold .sk-tablewrap { border: 0; }
+        details.sk-fold img { max-width: 100%; height: auto; }
+        @media (max-width: 768px) { table { font-size: 12px; } th, td { padding: 4px !important; } .sk-table th, .sk-table td { padding: 7px 6px !important; } table.sk-table { font-size: 14px; } }
+        </style>
     include-before-body:
       text: |
-        <nav style='font-size:15px; margin:0 0 6px 0; padding:6px 0; border-bottom:1px solid rgba(128,128,128,0.35);'><a href='https://ejperez2.github.io/skins-standings/' style='margin-right:14px;'>Standings</a><strong style='margin-right:14px;'>Daily Matchups</strong><button id='refresh-btn' type='button' style='display:none; font-size:13px; padding:2px 10px; cursor:pointer; color:inherit; background:transparent; border:1px solid rgba(128,128,128,0.6); border-radius:4px;'>Refresh now</button> <span id='refresh-msg' style='font-size:13px; opacity:0.85;'></span></nav>
+        <nav class='sk-nav'><a href='https://ejperez2.github.io/skins-standings/'>Standings</a><strong>Daily Matchups</strong><button id='refresh-btn' class='sk-btn' type='button' style='display:none;'>Refresh now</button><span id='refresh-msg' style='font-size:13px; opacity:0.85;'></span></nav>
         <script>
         // Owner-only refresh: shown with ?admin (or once a token is saved). The GitHub token lives only in this browser's localStorage.
         (function () {
@@ -42,29 +103,72 @@ format:
         </script>
     include-after-body:
       text: |
-        <footer style='font-size:14px; margin:28px 0 12px 0; padding-top:8px; border-top:1px solid rgba(128,128,128,0.35); opacity:0.85;'>Past seasons &middot; 2025-26: <a href='https://ejperez2.github.io/skins-standings/2025-26/'>Standings</a> &middot; <a href='https://ejperez2.github.io/Daily-Skins-Matchups/2025-26/'>Matchups</a></footer>
+        <footer style='font-size:14px; margin:28px 0 12px 0; padding:8px 16px 0 16px; border-top:1px solid rgba(128,128,128,0.35); opacity:0.85;'>Past seasons &middot; 2025-26: <a href='https://ejperez2.github.io/skins-standings/2025-26/'>Standings</a> &middot; <a href='https://ejperez2.github.io/Daily-Skins-Matchups/2025-26/'>Matchups</a></footer>
+        <script>
+        // "I'm" picker: highlight and pin the chosen player's games; remembered per browser.
+        (function () {
+          var KEY = "skinsMe";
+          var me = "";
+          try { me = localStorage.getItem(KEY) || ""; } catch (e) {}
+          var seg = document.getElementById("sk-me");
+          if (!seg) return;
+          var originals = Array.prototype.map.call(document.querySelectorAll(".sk-games"), function (box) {
+            return { box: box, cards: Array.prototype.slice.call(box.children) };
+          });
+
+          function tile(k, v) { return "<div><div class='k'>" + k + "</div><div class='v'>" + v + "</div></div>"; }
+          function pill(x) {
+            var n = parseFloat(x), cls = n > 0.1 ? "pos" : n < -0.1 ? "neg" : "";
+            return "<span class='sk-pill " + cls + "'>" + (n > 0.05 ? "+" : "") + x + "</span>";
+          }
+
+          function apply() {
+            Array.prototype.forEach.call(seg.querySelectorAll("button"), function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-me") === me)); });
+            originals.forEach(function (o) {
+              var mine = [], rest = [];
+              o.cards.forEach(function (c) {
+                var isMine = me !== "" && (" " + c.getAttribute("data-players") + " ").indexOf(" " + me + " ") >= 0;
+                c.classList.toggle("mine", isMine);
+                Array.prototype.forEach.call(c.querySelectorAll(".side"), function (s) { s.classList.toggle("me", me !== "" && s.getAttribute("data-player") === me); });
+                (isMine ? mine : rest).push(c);
+              });
+              mine.concat(rest).forEach(function (c) { o.box.appendChild(c); });
+            });
+            Array.prototype.forEach.call(document.querySelectorAll(".sk-table tr[data-player]"), function (r) { r.classList.toggle("me", r.getAttribute("data-player") === me); });
+
+            var strip = document.getElementById("sk-myday");
+            if (!strip) return;
+            if (!me) { strip.hidden = true; return; }
+            strip.hidden = false;
+            var row = document.querySelector("#sk-today-summary tr[data-player='" + me + "']");
+            if (!row) { strip.innerHTML = tile("My games", "0") + tile("Expected skins", "&ndash;") + tile("Luck", "&ndash;"); return; }
+            var states = Array.prototype.map.call(document.querySelectorAll("#sk-today-games .sk-card.mine"), function (c) { return c.getAttribute("data-state"); });
+            var allPre = states.length && states.every(function (s) { return s === "upcoming"; });
+            var allFinal = states.length && states.every(function (s) { return s === "final"; });
+            var d = row.dataset;
+            strip.innerHTML = tile("My games", d.games) +
+              (allPre ? tile("Expected skins", d.exp) : allFinal ? tile("Skins won", d.won) : tile("Live expected", d.live)) +
+              tile("Luck", allPre ? "&ndash;" : pill(d.luck));
+          }
+
+          seg.addEventListener("click", function (e) {
+            var b = e.target.closest("button");
+            if (!b) return;
+            me = b.getAttribute("data-me");
+            try { localStorage.setItem(KEY, me); } catch (err) {}
+            apply();
+          });
+          apply();
+
+          // While a game is live, reload every 5 minutes so the scoreboard stays current.
+          if (document.querySelector("#sk-today-games .sk-card[data-state='live']")) {
+            setInterval(function () { if (document.visibilityState === "visible") location.reload(); }, 5 * 60 * 1000);
+          }
+        })();
+        </script>
     theme: darkly
     grid:
       body-width: 1200px
-    css: |
-      table {
-        width: auto !important;
-        margin-left: auto;
-        margin-right: auto;
-      }
-      /* Mobile-friendly improvements */
-      @media (max-width: 768px) {
-        table {
-          font-size: 12px;
-        }
-        th, td {
-          padding: 4px !important;
-        }
-        .table-responsive {
-          overflow-x: auto;
-          -webkit-overflow-scrolling: touch;
-        }
-      }
 ---
 
 ```{r setup}
@@ -86,8 +190,9 @@ if (!dir.exists(history_dir)) {
 #| echo: false
 #| results: 'asis'
 ts <- format(Sys.time(), "%A, %B %d, %Y at %I:%M %p %Z", tz = "America/Chicago")
-cat(paste0("<p style='font-size:14px; color:#999;'><strong>Last updated:</strong> ", ts, "</p>"))
+cat(paste0("<p class='sk-meta'><strong>Last updated:</strong> ", ts, "</p>"))
 ```
+
 
 ```{r expected_skins_data}
 #| echo: false
@@ -772,157 +877,118 @@ if (nrow(todays_picks) > 0) {
 }
 ```
 
----
-
-## Daily Summary
-
-```{r final_player_summary}
+```{r card_helpers}
 #| echo: false
-#| message: false
-#| warning: false
-
-# Print Final Player Summary
-if (exists("todays_results") && nrow(todays_results) > 0) {
-  
-  # Calculate cumulative live expected skins
-  todays_results_with_cumulative <- todays_results %>%
-    mutate(
-      Cumulative_Live_Expected = if_else(!is.na(Won_Game), Actual_Skins, Live_Expected_Skins)
-    )
-  
-  # Identify self zero-sum matchups (same player, both teams in same game)
-  self_zero_sum_players <- todays_results_with_cumulative %>%
-    group_by(game_id, Player) %>%
-    filter(n() >= 2) %>%
-    pull(Player) %>%
-    unique()
-  
-  # Calculate Perfect Skins % for each player
-  perfect_skins_calc <- todays_results_with_cumulative %>%
-    group_by(Player) %>%
-    summarise(
-      num_games = n(),
-      perfect_prob = prod(Cumulative_Live_Expected, na.rm = TRUE),
-      .groups = 'drop'
-    ) %>%
-    mutate(
-      `Perfect Skins %` = case_when(
-        # If player has self zero-sum matchup, 0%
-        Player %in% self_zero_sum_players ~ 0,
-        # A perfect day needs every one of the player's teams to play (10 games), else 0%
-        num_games < TEAMS_PER_PLAYER ~ 0,
-        # Otherwise, multiply live expected skins probabilities and convert to %
-        TRUE ~ perfect_prob * 100
-      )
-    ) %>%
-    select(Player, `Perfect Skins %`)
-  
-  final_player_summary <- todays_results_with_cumulative %>%
-    group_by(Player) %>%
-    summarise(
-      `Total Expected Skins` = sum(`Expected Skins`, na.rm = TRUE),
-      `Live Expected Skins` = sum(Cumulative_Live_Expected, na.rm = TRUE),
-      `Total Actual Skins` = sum(Actual_Skins, na.rm = TRUE),
-      `Skins Luck` = sum(Skins_Luck, na.rm = TRUE),
-      `Total Games` = n(),
-      .groups = 'drop'
-    ) %>%
-    mutate(
-      `Live Skins Luck` = `Live Expected Skins` - `Total Expected Skins`
-    ) %>%
-    left_join(perfect_skins_calc, by = "Player") %>%
-    # Calculate Luck Leverage column (whole number with % symbol)
-    mutate(
-      `Luck Leverage` = if_else(
-        `Total Expected Skins` == 0, 
-        "0%", 
-        paste0(sprintf("%.0f", (`Live Skins Luck` / `Total Expected Skins`) * 100), "%")
-      )
-    ) %>%
-    # CHANGED: Order by Live Skins Luck (descending)
-    arrange(desc(`Live Skins Luck`)) %>%
-    mutate(
-      # Apply color coding to Player column
-      Player_Display = case_when(
-        `Skins Luck` > 0 ~ 
-          cell_spec(Player, background = "#90EE90", color = "#000000 !important", 
-                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        `Skins Luck` < 0 ~ 
-          cell_spec(Player, background = "#FFB6C6", color = "#000000 !important", 
-                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        TRUE ~ Player
-      ),
-      # Apply color coding to Live Skins Luck column - exclude values between -0.1 and 0.1
-      `Live Skins Luck Display` = case_when(
-        `Live Skins Luck` > 0.1 ~ 
-          cell_spec(sprintf("%.1f", `Live Skins Luck`), background = "#90EE90", color = "#000000 !important", 
-                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        `Live Skins Luck` < -0.1 ~ 
-          cell_spec(sprintf("%.1f", `Live Skins Luck`), background = "#FFB6C6", color = "#000000 !important", 
-                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        TRUE ~ as.character(sprintf("%.1f", `Live Skins Luck`))
-      ),
-      # Format Perfect Skins % with % symbol
-      `Perfect Skins % Display` = paste0(sprintf("%.1f", `Perfect Skins %`), "%")
-    ) %>%
-    select(
-      Player = Player_Display,
-      `Live Skins Luck` = `Live Skins Luck Display`,
-      `Luck Leverage`,
-      `Live Expected Skins`,
-      `Total Expected Skins`,
-      `Total Games`,
-      `Total Actual Skins`,
-      `Skins Luck`,
-      `Perfect Skins %` = `Perfect Skins % Display`
-    )
-  
-  # Add TOTAL row
-  total_row <- data.frame(
-    Player = "TOTAL",
-    `Live Skins Luck` = sprintf("%.1f", sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE) - 
-                         sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE)),
-    `Luck Leverage` = if_else(
-      sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE) == 0,
-      "0%",
-      paste0(sprintf("%.0f", ((sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE) - 
-        sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE)) / 
-       sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE)) * 100), "%")
-    ),
-    `Live Expected Skins` = sum(todays_results_with_cumulative$Cumulative_Live_Expected, na.rm = TRUE),
-    `Total Expected Skins` = sum(todays_results_with_cumulative$`Expected Skins`, na.rm = TRUE),
-    `Total Games` = nrow(todays_results_with_cumulative),
-    `Total Actual Skins` = sum(todays_results_with_cumulative$Actual_Skins, na.rm = TRUE),
-    `Skins Luck` = sum(todays_results_with_cumulative$Skins_Luck, na.rm = TRUE),
-    `Perfect Skins %` = paste0(sprintf("%.1f", sum(perfect_skins_calc$`Perfect Skins %`, na.rm = TRUE)), "%"),
-    check.names = FALSE,
-    stringsAsFactors = FALSE
-  )
-  
-  final_player_summary_with_total <- bind_rows(final_player_summary, total_row)
-  
-  knitr::kable(
-    final_player_summary_with_total,
-    digits = 1,
-    align = 'c',
-    escape = FALSE,
-    format = "html"
-  ) %>%
-    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(c(2, 3, 8, 9), bold = TRUE) %>%
-    row_spec(nrow(final_player_summary_with_total), bold = TRUE, background = "#444444")
+# HTML builders for the scoreboard cards and compact tables
+html_esc <- function(x) {
+  x <- gsub("&", "&amp;", x, fixed = TRUE)
+  x <- gsub("<", "&lt;", x, fixed = TRUE)
+  gsub(">", "&gt;", x, fixed = TRUE)
 }
+fmt_pct <- function(p) if_else(is.na(p), "", paste0(round(p * 100), "%"))
+luck_pill <- function(x) {
+  cls <- case_when(x > 0.1 ~ " pos", x < -0.1 ~ " neg", TRUE ~ "")
+  txt <- sprintf("%.1f", x)
+  txt <- if_else(txt == "-0.0", "0.0", txt)
+  txt <- if_else(x > 0.05, paste0("+", txt), txt)
+  paste0("<span class='sk-pill", cls, "'>", txt, "</span>")
+}
+
+# Convert "7:00 PM ET"-style statuses to Central time; leave others as-is
+to_ct <- function(s) {
+  out <- s
+  has_time <- !is.na(s) & str_detect(s, "\\d{1,2}:\\d{2}\\s*[AP]M\\s+ET")
+  if (any(has_time)) {
+    et <- parse_date_time(paste(Sys.Date(), str_extract(s[has_time], "\\d{1,2}:\\d{2}\\s*[AP]M")),
+                          orders = "ymd I:M p", tz = "America/New_York")
+    out[has_time] <- paste(sub("^0", "", format(with_tz(et, "America/Chicago"), "%I:%M %p")), "CT")
+  }
+  out
+}
+
+# One team row inside a card. `won` is TRUE/FALSE once the game is final, else NA.
+card_side <- function(abbr, player, pick, score, chance, won, state) {
+  cls <- paste0("side", if (isTRUE(won)) " won" else if (identical(won, FALSE)) " lost" else "")
+  pct_txt <- if (state == "final") (if (isTRUE(won)) "&#10003;" else "") else fmt_pct(chance)
+  width <- if (is.na(chance)) 0 else round(chance * 100, 1)
+  pick_word <- if (identical(pick, "L")) "lose" else "win"
+  paste0(
+    "<div class='", cls, "' data-player='", html_esc(player), "'>",
+    "<div class='abbr'>", html_esc(abbr), "</div>",
+    "<div class='owner'><span class='name'>", html_esc(player), "</span>",
+    "<span class='pick' title='Picked to ", pick_word, "'>", html_esc(pick), "</span></div>",
+    "<div class='score'>", if (is.na(score)) "" else score, "</div>",
+    "<div class='pct'>", pct_txt, "</div>",
+    "<div></div><div class='barrow'><span style='width:", width, "%'></span></div>",
+    "</div>"
+  )
+}
+
+# df: one row per drafted team with game_id, Player, Abbr, Pick, Expected (pregame skin chance),
+# Chance (live skin chance), Won_Skin, Own_Score, State (upcoming/live/final), Status_Text, sort_key
+build_cards <- function(df, container_id) {
+  games <- split(df, df$game_id)
+  games <- games[order(vapply(games, function(g) g$sort_key[1], numeric(1)))]
+  cards <- vapply(games, function(g) {
+    state <- g$State[1]
+    sides <- vapply(seq_len(nrow(g)), function(i) {
+      card_side(g$Abbr[i], g$Player[i], g$Pick[i], g$Own_Score[i], g$Chance[i], g$Won_Skin[i], state)
+    }, character(1))
+    label <- switch(state, final = "Skin", live = "Live skin chance", "Skin chance")
+    foot <- if (state == "upcoming") {
+      paste0("Expected skins: ", paste0(html_esc(g$Player), " ", sprintf("%.2f", g$Expected), collapse = " &middot; "))
+    } else {
+      paste0("Pregame: ", paste0(html_esc(g$Abbr), " ", fmt_pct(g$Expected), collapse = " / "))
+    }
+    paste0(
+      "<article class='sk-card' data-state='", state, "' data-players='", html_esc(paste(unique(g$Player), collapse = " ")), "'>",
+      "<div class='top'><span class='", state, "'>", html_esc(g$Status_Text[1]), "</span><span>", label, "</span></div>",
+      paste(sides, collapse = ""),
+      "<div class='foot'>", foot, "</div>",
+      "</article>"
+    )
+  }, character(1))
+  paste0("<div class='sk-games' id='", container_id, "'>", paste(cards, collapse = "\n"), "</div>")
+}
+
+# Compact per-player table. rows: Player plus the named numeric columns in `cols` (header = name).
+build_table <- function(rows, cols, table_id, data_attrs = FALSE) {
+  head <- paste0("<thead><tr><th>Player</th>", paste0("<th>", names(cols), "</th>", collapse = ""), "</tr></thead>")
+  body <- vapply(seq_len(nrow(rows)), function(i) {
+    r <- rows[i, ]
+    cells <- vapply(cols, function(f) f(r), character(1))
+    attrs <- if (data_attrs) {
+      sprintf(" data-games='%d' data-exp='%.1f' data-live='%.1f' data-won='%d' data-luck='%.1f'",
+              as.integer(r$Games), r$Expected, r$Live, as.integer(r$Won), r$Luck)
+    } else ""
+    paste0("<tr data-player='", html_esc(r$Player), "'", attrs, "><td>", html_esc(r$Player), "</td>",
+           paste0("<td>", cells, "</td>", collapse = ""), "</tr>")
+  }, character(1))
+  paste0("<div class='sk-tablewrap'><table class='sk-table' id='", table_id, "' data-quarto-disable-processing='true'>",
+         head, "<tbody>", paste(body, collapse = ""), "</tbody></table></div>")
+}
+
+cat_html <- function(x) cat("\n```{=html}\n", x, "\n```\n", sep = "")
 ```
 
----
+```{r me_picker}
+#| echo: false
+#| results: 'asis'
+cat_html(paste0(
+  "<div class='sk-who'>I'm <span class='sk-seg' id='sk-me'>",
+  paste0("<button type='button' data-me='", PLAYERS, "'>", PLAYERS, "</button>", collapse = ""),
+  "<button type='button' data-me=''>All</button></span></div>",
+  "<div class='sk-myday' id='sk-myday' hidden></div>"
+))
+```
 
-## Today's Results & Skins Luck
-
-```{r matchup_table}
+```{r todays_games}
 #| echo: false
 #| message: false
 #| warning: false
+#| results: 'asis'
 
+cat_html("<h2 class='sk-h'>Games</h2>")
 # Create Head-to-Head Matchup Table
 if (nrow(todays_picks) > 0) {
   
@@ -1071,386 +1137,110 @@ if (nrow(todays_picks) > 0) {
     ) %>%
     select(-Won_Game_new, -GameStatus, -Score)
   
-  # Build the matchup table - ONE ROW PER GAME
-  matchup_prep <- todays_picks %>%
+  # --- Scoreboard cards: one per game, live first, then upcoming by tip-off, then finals ---
+  card_data <- todays_picks %>%
     mutate(
-      # IMPROVED: Use first non-NA value for cumulative calculation
-      Cumulative_Live_Expected = case_when(
-        !is.na(Won_Game) ~ Actual_Skins,
+      Status_CT = to_ct(Game_Status),
+      State = case_when(
+        Game_Status == "Final" ~ "final",
+        is.na(Game_Status) | str_detect(Status_CT, "CT$") ~ "upcoming",
+        TRUE ~ "live"
+      ),
+      Status_Text = case_when(
+        !is.na(Status_CT) ~ Status_CT,
+        !is.na(game_time_ct) ~ paste(sub("^0", "", format(game_time_ct, "%I:%M %p", tz = "America/Chicago")), "CT"),
+        TRUE ~ "Today"
+      ),
+      Expected = `Expected Skins`,
+      Chance = case_when(
+        !is.na(Won_Skin) ~ as.numeric(Won_Skin),
         !is.na(Live_Expected_Skins) ~ Live_Expected_Skins,
-        TRUE ~ `Expected Skins`  # Fallback to Expected if Live is also NA
+        TRUE ~ `Expected Skins`
+      ),
+      Own_Score = if_else(State == "upcoming", NA_character_, str_extract(Game_Score, "^\\d+")),
+      live_order = case_when(
+        str_detect(Status_CT, "OT|Q4") ~ 1,
+        str_detect(Status_CT, "Q3") ~ 2,
+        str_detect(Status_CT, "Half") ~ 3,
+        str_detect(Status_CT, "Q2") ~ 4,
+        TRUE ~ 5
+      ),
+      sort_key = case_when(
+        State == "live" ~ live_order,
+        State == "upcoming" ~ 10 + coalesce(as.numeric(game_time_ct) / 1e10, 0.9),
+        TRUE ~ 20
       )
-    ) %>%
-    arrange(game_id)
-  
-  # Create one row per game with both players
-  matchup_table <- matchup_prep %>%
-    group_by(game_id) %>%
-    summarise(
-      Player_1 = first(Player),
-      Team_1 = first(Team),
-      Pick_1 = first(Pick),
-      Won_Skin_1 = first(Won_Skin),
-      # IMPROVED: Get first non-NA live expected skins
-      Live_Skin_Prob_1 = coalesce(first(Cumulative_Live_Expected), first(`Expected Skins`)),
-      Score_1 = first(Game_Score),
-      Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
-      Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
-      Pick_2 = if(n() > 1) nth(Pick, 2) else NA_character_,
-      Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA,
-      # IMPROVED: Get second non-NA live expected skins
-      Live_Skin_Prob_2 = if(n() > 1) coalesce(nth(Cumulative_Live_Expected, 2), nth(`Expected Skins`, 2)) else NA,
-      Score_2 = if(n() > 1) nth(Game_Score, 2) else NA_character_,
-      Status = first(Game_Status),
-      game_time_ct = first(game_time_ct),
-      .groups = 'drop'
-    ) %>%
-    mutate(
-      # Convert ET times in Status to CT for display
-      Status_CT = case_when(
-        # Check if Status contains ET time pattern (e.g., "7:00 PM ET")
-        str_detect(Status, "\\d{1,2}:\\d{2}\\s*[AP]M\\s+ET") ~ {
-          # Extract the time string
-          time_str <- str_extract(Status, "\\d{1,2}:\\d{2}\\s*[AP]M")
-          # Parse as ET time for today
-          et_time <- parse_date_time(paste(Sys.Date(), time_str), 
-                                     orders = "ymd I:M p", 
-                                     tz = "America/New_York")
-          # Convert to CT
-          ct_time <- with_tz(et_time, tzone = "America/Chicago")
-          # Format as time string with CT
-          paste(format(ct_time, "%I:%M %p CT"))
-        },
-        TRUE ~ Status
-      ),
-      # Create sort order for status
-      status_order = case_when(
-        Status == "Final" ~ 1,
-        str_detect(Status, "Q4") ~ 2,
-        str_detect(Status, "Q3") ~ 3,
-        str_detect(Status, "Half") ~ 4,
-        str_detect(Status, "Q2") ~ 5,
-        str_detect(Status, "Q1") ~ 6,
-        str_detect(Status, "OT") ~ 2,  # Group OT with Q4
-        TRUE ~ 7  # Not Started and other (including upcoming games with times)
-      ),
-      # For upcoming games (status_order 7), use game time for sorting (soonest first)
-      time_order = if_else(
-        status_order == 7 & !is.na(game_time_ct), 
-        as.numeric(game_time_ct), 
-        as.numeric(Sys.time())
-      )
-    ) %>%
-    arrange(status_order, time_order, game_id) %>%
-    mutate(
-      # Format player names with color highlighting
-      Player_1_Display = case_when(
-        Status == "Final" & !is.na(Won_Skin_1) & Won_Skin_1 ~ 
-          cell_spec(Player_1, background = "#90EE90", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        Status == "Final" & !is.na(Won_Skin_1) & !Won_Skin_1 ~ 
-          cell_spec(Player_1, background = "#FFB6C6", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        TRUE ~ Player_1
-      ),
-      Player_2_Display = case_when(
-        is.na(Player_2) ~ "",
-        Status == "Final" & !is.na(Won_Skin_2) & Won_Skin_2 == TRUE ~ 
-          cell_spec(Player_2, background = "#90EE90", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        Status == "Final" & !is.na(Won_Skin_2) & Won_Skin_2 == FALSE ~ 
-          cell_spec(Player_2, background = "#FFB6C6", color = "#000000 !important", bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        TRUE ~ Player_2
-      ),
-      # Add checkmarks for Won_Skin status
-      Won_1 = case_when(
-        Status != "Final" ~ "",
-        is.na(Won_Skin_1) ~ "",
-        Won_Skin_1 ~ "✓ Yes",
-        TRUE ~ "✗ No"
-      ),
-      Won_2 = case_when(
-        Status != "Final" ~ "",
-        is.na(Player_2) ~ "",
-        is.na(Won_Skin_2) ~ "",
-        Won_Skin_2 ~ "✓ Yes",
-        TRUE ~ "✗ No"
-      ),
-      # Format Live Probabilities - now should always have values
-      Live_Prob_1_Display = if_else(is.na(Live_Skin_Prob_1), "", paste0(sprintf("%.0f", Live_Skin_Prob_1 * 100), "%")),
-      Live_Prob_2_Display = if_else(is.na(Live_Skin_Prob_2), "", paste0(sprintf("%.0f", Live_Skin_Prob_2 * 100), "%")),
-      # FIXED: Format combined score (use first team's score which is in Team1-Team2 format)
-      # Only show if not empty
-      Combined_Score = if_else(
-        str_detect(Status_CT, "\\d{1,2}:\\d{2}\\s*[AP]M\\s+CT"),  # If upcoming game with time
-        "",  # Blank score
-        if_else(is.na(Score_1) | Score_1 == "", "", Score_1)  # Otherwise use existing logic
-      ),
-      # Create vs. display
-      VS = if_else(is.na(Player_2), "", "vs."),
-      Team_2_Display = if_else(is.na(Team_2), "", Team_2),
-      Pick_2_Display = if_else(is.na(Pick_2), "", Pick_2)
-    ) %>%
-    # Select final columns
-    select(
-      Player = Player_1_Display,
-      Team = Team_1,
-      Pick = Pick_1,
-      `Won Skin` = Won_1,
-      `Live Skin Prob` = Live_Prob_1_Display, 
-      VS,
-      `Player 2` = Player_2_Display,
-      `Team 2` = Team_2_Display,
-      `Pick 2` = Pick_2_Display,
-      `Won Skin 2` = Won_2,
-      `Live Skin Prob 2` = Live_Prob_2_Display, 
-      Status = Status_CT,
-      Score = Combined_Score
     )
-  
-  # Create the table with HTML formatting enabled
-  knitr::kable(
-    matchup_table,
-    align = 'c',
-    caption = "Head-to-Head Matchups",
-    escape = FALSE,
-    format = "html"
-  ) %>%
-    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
-  
+
+  cat_html(build_cards(card_data, "sk-today-games"))
 } else {
   cat("No games scheduled for today.")
 }
 ```
 
-```{r zero_sum_table}
+```{r today_summary}
 #| echo: false
 #| message: false
 #| warning: false
+#| results: 'asis'
 
-# Create Zero-Sum Matchups Table
-if (nrow(todays_picks) > 0) {
-  
-  # Identify zero-sum matchups
-  zero_sum_games <- todays_picks %>%
-    group_by(game_id) %>%
-    filter(
-      n() == 2,  # Exactly 2 teams in the game
-      (all(Pick == "W") | all(Pick == "L"))  # Both W or both L
+# Today by player: Live counts a finished game as its actual skin, otherwise the live skin chance
+if (exists("todays_results") && nrow(todays_results) > 0) {
+  day_summary <- todays_results %>%
+    mutate(Live_Now = if_else(!is.na(Won_Game), Actual_Skins, coalesce(Live_Expected_Skins, `Expected Skins`))) %>%
+    group_by(Player) %>%
+    summarise(
+      Games = n(),
+      Expected = sum(`Expected Skins`, na.rm = TRUE),
+      Live = sum(Live_Now, na.rm = TRUE),
+      Won = sum(Actual_Skins, na.rm = TRUE),
+      .groups = "drop"
     ) %>%
-    ungroup()
-  
-  if (nrow(zero_sum_games) > 0) {
-    # Build zero-sum table
-    zero_sum_table <- zero_sum_games %>%
-      group_by(game_id) %>%
-      summarise(
-        Player_1 = first(Player),
-        Team_1 = first(Team),
-        Pick_1 = first(Pick),
-        Expected_1 = first(`Expected Skins`),
-        Won_Skin_1 = first(Won_Skin),
-        Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
-        Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
-        Pick_2 = if(n() > 1) nth(Pick, 2) else NA_character_,
-        Expected_2 = if(n() > 1) nth(`Expected Skins`, 2) else NA_real_,
-        Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA,
-        Status = first(Game_Status),
-        .groups = 'drop'
-      ) %>%
-      mutate(
-        # Apply color-coding to Player columns
-        Player_1_Display = case_when(
-          Status == "Final" & !is.na(Won_Skin_1) & Won_Skin_1 ~ 
-            cell_spec(Player_1, background = "#90EE90", color = "#000000 !important", 
-                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-          Status == "Final" & !is.na(Won_Skin_1) & !Won_Skin_1 ~ 
-            cell_spec(Player_1, background = "#FFB6C6", color = "#000000 !important", 
-                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-          TRUE ~ Player_1
-        ),
-        Player_2_Display = case_when(
-          is.na(Player_2) ~ "",
-          Status == "Final" & !is.na(Won_Skin_2) & Won_Skin_2 ~ 
-            cell_spec(Player_2, background = "#90EE90", color = "#000000 !important", 
-                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-          Status == "Final" & !is.na(Won_Skin_2) & !Won_Skin_2 ~ 
-            cell_spec(Player_2, background = "#FFB6C6", color = "#000000 !important", 
-                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-          TRUE ~ Player_2
-        )
-      ) %>%
-      select(
-        `Player 1` = Player_1_Display,
-        `Team 1` = Team_1,
-        `Pick 1` = Pick_1,
-        `Expected Skins 1` = Expected_1,
-        `Player 2` = Player_2_Display,
-        `Team 2` = Team_2,
-        `Pick 2` = Pick_2,
-        `Expected Skins 2` = Expected_2
-      )
-    
-    cat("\n\n")
-    knitr::kable(
-      zero_sum_table,
-      digits = 2,
-      align = 'c',
-      caption = "Zero-Sum Matchups (Max 1 Skin Available)",
-      escape = FALSE,
-      format = "html"
-    ) %>%
-      kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-      column_spec(c(4, 8), bold = TRUE)
-  }
-  
-} else {
-  cat("")
+    mutate(Luck = Live - Expected) %>%
+    arrange(desc(Luck))
+
+  cat_html(paste0(
+    "<h2 class='sk-h'>Today by player</h2>",
+    build_table(day_summary, list(
+      Games = function(r) as.character(r$Games),
+      Expected = function(r) sprintf("%.1f", r$Expected),
+      Live = function(r) sprintf("%.1f", r$Live),
+      Won = function(r) as.character(r$Won),
+      Luck = function(r) luck_pill(r$Luck)
+    ), "sk-today-summary", data_attrs = TRUE),
+    "<p class='sk-note'>Luck = live expected skins minus pregame expected skins.</p>"
+  ))
 }
 ```
 
-```{r completed_games_table}
-#| echo: false
-#| message: false
-#| warning: false
-
-# Print Table 4: Completed Games Summary
-if (exists("todays_results") && nrow(todays_results) > 0) {
-  completed_games_table <- todays_results %>%
-    filter(!is.na(Won_Game)) %>%
-    mutate(
-      # Calculate Won_Skin first
-      Won_Skin = case_when(
-        Won_Game == TRUE & Pick == "W" ~ TRUE,
-        Won_Game == FALSE & Pick == "L" ~ TRUE,
-        is.na(Won_Game) ~ NA,
-        TRUE ~ FALSE
-      ),
-      # Apply color-coding to Player column
-      Player_Display = case_when(
-        Won_Skin == TRUE ~ 
-          cell_spec(Player, background = "#90EE90", color = "#000000 !important", 
-                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        Won_Skin == FALSE ~ 
-          cell_spec(Player, background = "#FFB6C6", color = "#000000 !important", 
-                    bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-        TRUE ~ Player
-      ),
-      # Convert Won_Game to character for consistency with total row
-      Won_Game_Display = as.character(Won_Game)
-    ) %>%
-    select(
-      Player = Player_Display,
-      Team,
-      Pick,
-      `Won Game?` = Won_Game_Display,
-      `Actual Skins` = Actual_Skins,
-      `Expected Skins`,
-      `Skins Luck` = Skins_Luck
-    ) %>%
-    arrange(Team)
-  
-  if (nrow(completed_games_table) > 0) {
-    # Add TOTAL row
-    total_row <- data.frame(
-      Player = "TOTAL",
-      Team = "",
-      Pick = "",
-      `Won Game?` = "",
-      `Actual Skins` = sum(todays_results %>% filter(!is.na(Won_Game)) %>% pull(Actual_Skins), na.rm = TRUE),
-      `Expected Skins` = sum(todays_results %>% filter(!is.na(Won_Game)) %>% pull(`Expected Skins`), na.rm = TRUE),
-      `Skins Luck` = sum(todays_results %>% filter(!is.na(Won_Game)) %>% pull(Skins_Luck), na.rm = TRUE),
-      check.names = FALSE,
-      stringsAsFactors = FALSE
-    )
-    
-    completed_games_with_total <- bind_rows(completed_games_table, total_row)
-    
-    knitr::kable(completed_games_with_total, digits = 1, align = 'c', caption = "Skins Results for Completed Games", escape = FALSE, format = "html") %>%
-      kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-      column_spec(c(5, 7), bold = TRUE) %>%
-      row_spec(nrow(completed_games_with_total), bold = TRUE, background = "#444444")
-  } else {
-    cat("No games have been completed yet today.")
-  }
-}
+```{=html}
+<details class="sk-fold"><summary>Odds by team</summary><div class="sk-inner">
 ```
 
 ```{r expected_team_table}
 #| echo: false
 
-# Print Table 3: Today's Expected Skins by Team
+# Today's pregame odds for every drafted team
 if (nrow(todays_picks) > 0) {
-  
-  # Join with results data to determine if games are complete and skins won
-  team_table_data <- todays_picks
-  
-  # If todays_results exists, join to get Won_Game status
-  if (exists("todays_results")) {
-    team_table_data <- team_table_data %>%
-      left_join(
-        todays_results %>% select(Team, Won_Game_final = Won_Game, Actual_Skins_final = Actual_Skins),
-        by = "Team"
-      ) %>%
-      mutate(
-        Won_Game = coalesce(Won_Game_final, Won_Game),
-        Actual_Skins = coalesce(Actual_Skins_final, Actual_Skins),
-        Won_Skin = case_when(
-          is.na(Won_Game) ~ NA,
-          Won_Game == TRUE & Pick == "W" ~ TRUE,
-          Won_Game == FALSE & Pick == "L" ~ TRUE,
-          TRUE ~ FALSE
-        ),
-        # Apply color-coding to Player column
-        Player_Display = case_when(
-          !is.na(Won_Skin) & Won_Skin == TRUE ~ 
-            cell_spec(Player, background = "#90EE90", color = "#000000 !important", 
-                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-          !is.na(Won_Skin) & Won_Skin == FALSE ~ 
-            cell_spec(Player, background = "#FFB6C6", color = "#000000 !important", 
-                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-          TRUE ~ Player
-        ),
-        # Apply color-coding to Team column
-        Team_Display = case_when(
-          !is.na(Won_Skin) & Won_Skin == TRUE ~ 
-            cell_spec(Team, background = "#90EE90", color = "#000000 !important", 
-                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-          !is.na(Won_Skin) & Won_Skin == FALSE ~ 
-            cell_spec(Team, background = "#FFB6C6", color = "#000000 !important", 
-                      bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-          TRUE ~ Team
-        )
-      ) %>%
-      select(-Won_Game_final, -Actual_Skins_final)
-  } else {
-    # No results yet, use original Player and Team columns
-    team_table_data <- team_table_data %>%
-      mutate(Player_Display = Player, Team_Display = Team)
-  }
-  
-  # Format the table and sort by Player, then Expected Skins within Player
-  team_table_data <- team_table_data %>%
+  team_table_data <- todays_picks %>%
     mutate(`Implied Prob` = if_else(is.na(`Implied Prob`), "", paste0(sprintf("%.0f", `Implied Prob` * 100), "%"))) %>%
-    select(Team = Team_Display, Pick, `Expected Skins`, Player = Player_Display, Moneyline, `Implied Prob`, Player_Raw = Player) %>%
-    arrange(Player_Raw, desc(`Expected Skins`)) %>%
-    select(-Player_Raw)
-  
-  knitr::kable(
-    team_table_data, 
-    digits = 1, 
-    align = 'c',
-    caption = "Today's Expected Skins by Team",
-    escape = FALSE,  # Important: allows HTML formatting
-    format = "html"
-  ) %>%
-    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(3, bold = TRUE)
+    select(Team, Pick, `Expected Skins`, Player, Moneyline, `Implied Prob`) %>%
+    arrange(Player, desc(`Expected Skins`))
+
+  knitr::kable(team_table_data, digits = 2, align = 'c', format = "html") %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 } else {
   cat("No games scheduled for today.")
 }
 ```
 
----
+```{=html}
+</div></details>
+```
 
-## Yesterday's Results
+```{=html}
+<details class="sk-fold"><summary>Yesterday</summary><div class="sk-inner">
+```
 
 ```{r yesterday_matchup_table}
 #| echo: false
@@ -1559,158 +1349,40 @@ if (file.exists(yesterday_file)) {
         ) %>%
         filter(!is.na(scrape_game_id))
       
-      # Build the matchup table - ONE ROW PER GAME
-      yesterday_matchup_table <- yesterday_with_game %>%
-        group_by(scrape_game_id) %>%
-        summarise(
-          Player_1 = first(Player),
-          Team_1 = first(Team),
-          Pick_1 = first(Pick),
-          Won_Skin_1 = first(Won_Skin),
-          Expected_Skin_1 = round(first(Expected_Skins), 1),
-          Player_2 = if(n() > 1) nth(Player, 2) else NA_character_,
-          Team_2 = if(n() > 1) nth(Team, 2) else NA_character_,
-          Pick_2 = if(n() > 1) nth(Pick, 2) else NA_character_,
-          Won_Skin_2 = if(n() > 1) nth(Won_Skin, 2) else NA,
-          Expected_Skin_2 = if(n() > 1) round(nth(Expected_Skins, 2), 1) else NA_real_,
-          Final_Score_Game = first(Final_Score_Display),
-          Status = first(Game_Status),
-          .groups = 'drop'
-        ) %>%
-        mutate(
-          Player_1_Display = case_when(
-            !is.na(Won_Skin_1) & Won_Skin_1 == TRUE ~ 
-              cell_spec(Player_1, background = "#90EE90", color = "#000000 !important", 
-                        bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-            !is.na(Won_Skin_1) & Won_Skin_1 == FALSE ~ 
-              cell_spec(Player_1, background = "#FFB6C6", color = "#000000 !important", 
-                        bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-            TRUE ~ Player_1
-          ),
-          Player_2_Display = case_when(
-            is.na(Player_2) ~ "",
-            !is.na(Won_Skin_2) & Won_Skin_2 == TRUE ~ 
-              cell_spec(Player_2, background = "#90EE90", color = "#000000 !important", 
-                        bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-            !is.na(Won_Skin_2) & Won_Skin_2 == FALSE ~ 
-              cell_spec(Player_2, background = "#FFB6C6", color = "#000000 !important", 
-                        bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-            TRUE ~ Player_2
-          ),
-          Won_1 = case_when(
-            is.na(Won_Skin_1) ~ "",
-            Won_Skin_1 == TRUE ~ "✓ Yes",
-            Won_Skin_1 == FALSE ~ "✗ No",
-            TRUE ~ ""
-          ),
-          Won_2 = case_when(
-            is.na(Player_2) ~ "",
-            is.na(Won_Skin_2) ~ "",
-            Won_Skin_2 == TRUE ~ "✓ Yes",
-            Won_Skin_2 == FALSE ~ "✗ No",
-            TRUE ~ ""
-          ),
-          VS = if_else(is.na(Player_2), "", "vs."),
-          Team_2_Display = if_else(is.na(Team_2), "", Team_2),
-          Pick_2_Display = if_else(is.na(Pick_2), "", Pick_2)
-        ) %>%
-        select(
-          Player = Player_1_Display,
-          Team = Team_1,
-          Pick = Pick_1,
-          `Won Skin` = Won_1,
-          `Expected Skin` = Expected_Skin_1,
-          VS,
-          `Player 2` = Player_2_Display,
-          `Team 2` = Team_2_Display,
-          `Pick 2` = Pick_2_Display,
-          `Won Skin 2` = Won_2,
-          `Expected Skin 2` = Expected_Skin_2,
-          `Final Score` = Final_Score_Game
-        )
-      
-      if (nrow(yesterday_matchup_table) > 0) {
-        print(knitr::kable(
-          yesterday_matchup_table,
-          align = 'c',
-          caption = paste0(format(yesterday_ct, "%B %d, %Y"), " - Head-to-Head Matchups"),
-          escape = FALSE,
-          format = "html"
-        ) %>%
-          kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE))
-        
-        yesterday_player_summary <- yesterday_with_game %>%
+      if (nrow(yesterday_with_game) > 0) {
+        yesterday_cards <- yesterday_with_game %>%
+          mutate(
+            game_id = scrape_game_id,
+            State = if_else(is.na(Won_Game), "upcoming", "final"),
+            Status_Text = if_else(is.na(Won_Game), "No result", "Final"),
+            Expected = Expected_Skins,
+            Chance = if_else(is.na(Won_Skin), Expected_Skins, as.numeric(Won_Skin)),
+            Own_Score = str_extract(Final_Score_Display, "^\\d+"),
+            sort_key = 0
+          )
+
+        yesterday_summary <- yesterday_with_game %>%
           group_by(Player) %>%
           summarise(
-            Total_Expected_Skins = sum(Expected_Skins, na.rm = TRUE),
-            Total_Actual_Skins = sum(Actual_Skins, na.rm = TRUE),
-            Skins_Luck_Total = sum(Skins_Luck, na.rm = TRUE),
-            .groups = 'drop'
+            Games = n(),
+            Expected = sum(Expected_Skins, na.rm = TRUE),
+            Won = sum(Actual_Skins, na.rm = TRUE),
+            Luck = sum(Skins_Luck, na.rm = TRUE),
+            .groups = "drop"
           ) %>%
-          # Calculate Luck Leverage column (whole number with % symbol)
-          mutate(
-            `Luck Leverage` = if_else(
-              Total_Expected_Skins == 0,
-              "0%",
-              paste0(sprintf("%.0f", (Skins_Luck_Total / Total_Expected_Skins) * 100), "%")
-            )
-          ) %>%
-          rename(
-            `Total Expected Skins` = Total_Expected_Skins,
-            `Total Actual Skins` = Total_Actual_Skins,
-            `Skins Luck` = Skins_Luck_Total
-          ) %>%
-          arrange(desc(`Skins Luck`)) %>%
-          mutate(
-            # Apply color coding to Player column - FIXED: exclude values between -0.1 and 0.1
-            Player_Display = case_when(
-              `Skins Luck` > 0.1 ~ 
-                cell_spec(Player, background = "#90EE90", color = "#000000 !important", 
-                          bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-              `Skins Luck` < -0.1 ~ 
-                cell_spec(Player, background = "#FFB6C6", color = "#000000 !important", 
-                          bold = TRUE, format = "html", extra_css = "color: #000000 !important;"),
-              TRUE ~ Player
-            )
-          ) %>%
-          select(
-            Player = Player_Display,
-            `Total Expected Skins`,
-            `Total Actual Skins`,
-            `Skins Luck`,
-            `Luck Leverage`
-          )
-        
-        # Add TOTAL row
-        total_row <- data.frame(
-          Player = "TOTAL",
-          `Total Expected Skins` = sum(yesterday_with_game$Expected_Skins, na.rm = TRUE),
-          `Total Actual Skins` = sum(yesterday_with_game$Actual_Skins, na.rm = TRUE),
-          `Skins Luck` = sum(yesterday_with_game$Skins_Luck, na.rm = TRUE),
-          `Luck Leverage` = if_else(
-            sum(yesterday_with_game$Expected_Skins, na.rm = TRUE) == 0,
-            "0%",
-            paste0(sprintf("%.0f", (sum(yesterday_with_game$Skins_Luck, na.rm = TRUE) / 
-             sum(yesterday_with_game$Expected_Skins, na.rm = TRUE)) * 100), "%")
-          ),
-          check.names = FALSE,
-          stringsAsFactors = FALSE
-        )
-        
-        yesterday_player_summary_with_total <- bind_rows(yesterday_player_summary, total_row)
-        
-        cat("<br>")
-        print(knitr::kable(
-          yesterday_player_summary_with_total,
-          digits = 1,
-          align = 'c',
-          caption = paste0(format(yesterday_ct, "%B %d"), " - Player Summary"),
-          escape = FALSE,
-          format = "html"
-        ) %>%
-          kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-          column_spec(c(4, 5), bold = TRUE) %>%
-          row_spec(nrow(yesterday_player_summary_with_total), bold = TRUE, background = "#444444"))
+          arrange(desc(Luck))
+
+        cat_html(paste0(
+          "<p class='sk-meta'>", format(yesterday_ct, "%A, %B %d"), "</p>",
+          build_cards(yesterday_cards, "sk-yesterday-games"),
+          "<h2 class='sk-h'>Yesterday by player</h2>",
+          build_table(yesterday_summary, list(
+            Games = function(r) as.character(r$Games),
+            Expected = function(r) sprintf("%.1f", r$Expected),
+            Won = function(r) as.character(r$Won),
+            Luck = function(r) luck_pill(r$Luck)
+          ), "sk-yesterday-summary")
+        ))
       }
     }
   }
@@ -1719,10 +1391,13 @@ if (file.exists(yesterday_file)) {
 }
 ```
 
+```{=html}
+</div></details>
+```
 
----
-
-## Season-to-Date Cumulative Stats
+```{=html}
+<details class="sk-fold"><summary>Season to date</summary><div class="sk-inner">
+```
 
 ```{r ytd_setup}
 #| echo: false
@@ -1754,6 +1429,7 @@ baseline_date <- SEASON_START
 #| echo: false
 #| message: false
 #| warning: false
+#| results: 'asis'
 
 ytd_data <- data.frame()
 all_files <- list.files(history_dir, pattern = "^\\d{4}-\\d{2}-\\d{2}\\.csv$", full.names = TRUE)
@@ -1763,207 +1439,49 @@ if (length(all_files) > 0) {
     file_date <- as_date(str_extract(basename(f), "\\d{4}-\\d{2}-\\d{2}"))
     return(!is.na(file_date) && file_date >= baseline_date)
   })]
-  
+
   if (length(valid_files) > 0) {
     all_history <- bind_rows(lapply(valid_files, function(f) read_csv(f, show_col_types = FALSE)))
-    current_year <- year(today_ct)
     ytd_data <- all_history %>%
       filter(Date >= baseline_date, !is.na(Actual_Skins))
-
   }
 }
 
-if (nrow(ytd_data) > 0) {
-  ytd_new_data <- ytd_data %>%
+# Baseline plus every finished game since SEASON_START
+ytd_new_data <- if (nrow(ytd_data) > 0) {
+  ytd_data %>%
     group_by(Player) %>%
     summarise(
-      Games_new = n(),
-      Total_Expected_Skins_new = sum(Expected_Skins, na.rm = TRUE),
-      Total_Actual_Skins_new = sum(Actual_Skins, na.rm = TRUE),
-      Cumulative_Skins_Luck_new = sum(Skins_Luck, na.rm = TRUE),
+      Games = n(),
+      Total_Expected_Skins = sum(Expected_Skins, na.rm = TRUE),
+      Total_Actual_Skins = sum(Actual_Skins, na.rm = TRUE),
+      Cumulative_Skins_Luck = sum(Skins_Luck, na.rm = TRUE),
       .groups = 'drop'
     )
-    
-  ytd_baseline_renamed <- ytd_baseline %>%
-    rename(
-      Games_baseline = Games,
-      Total_Expected_Skins_baseline = Total_Expected_Skins,
-      Total_Actual_Skins_baseline = Total_Actual_Skins,
-      Cumulative_Skins_Luck_baseline = Cumulative_Skins_Luck
-    )
-
-  ytd_summary <- ytd_baseline_renamed %>%
-    full_join(ytd_new_data, by = "Player") %>%
-    mutate(
-      Games = coalesce(Games_baseline, 0) + coalesce(Games_new, 0),
-      Total_Expected_Skins = coalesce(Total_Expected_Skins_baseline, 0) + coalesce(Total_Expected_Skins_new, 0),
-      Total_Actual_Skins = coalesce(Total_Actual_Skins_baseline, 0) + coalesce(Total_Actual_Skins_new, 0),
-      Cumulative_Skins_Luck = coalesce(Cumulative_Skins_Luck_baseline, 0) + coalesce(Cumulative_Skins_Luck_new, 0)
-    ) %>%
-    select(Player, Cumulative_Skins_Luck, Games, Total_Expected_Skins, Total_Actual_Skins) %>%
-    mutate(
-      Expected_Skins_Pct = if_else(Games == 0, 0, (Total_Expected_Skins / Games) * 100)
-    ) %>%
-    rename(
-      `Total Expected Skins` = Total_Expected_Skins, `Total Actual Skins` = Total_Actual_Skins,
-      `Cumulative Skins Luck` = Cumulative_Skins_Luck, `Expected Skins %` = Expected_Skins_Pct
-    ) %>%
-    arrange(desc(`Cumulative Skins Luck`))
-  
-  # Add Total row
-  total_games <- sum(ytd_summary$Games)
-  total_expected <- sum(ytd_summary$`Total Expected Skins`)
-  total_actual <- sum(ytd_summary$`Total Actual Skins`)
-  total_luck <- sum(ytd_summary$`Cumulative Skins Luck`)
-  weighted_avg_expected_pct <- if_else(total_games == 0, 0, (total_expected / total_games) * 100)
-  
-  total_row <- data.frame(
-    Player = "TOTAL",
-    `Cumulative Skins Luck` = total_luck,
-    Games = total_games,
-    `Total Expected Skins` = total_expected,
-    `Total Actual Skins` = total_actual,
-    `Expected Skins %` = weighted_avg_expected_pct,
-    check.names = FALSE
-  )
-  
-  ytd_summary_with_total <- bind_rows(ytd_summary, total_row)
-  
-  # Apply gradient color to Cumulative Skins Luck column
-  max_luck <- max(ytd_summary$`Cumulative Skins Luck`, na.rm = TRUE)
-  min_luck <- min(ytd_summary$`Cumulative Skins Luck`, na.rm = TRUE)
-  
-  ytd_summary_with_total <- ytd_summary_with_total %>%
-    mutate(
-      `Cumulative Skins Luck Display` = if_else(
-        Player == "TOTAL",
-        as.character(sprintf("%.1f", `Cumulative Skins Luck`)),
-        case_when(
-          `Cumulative Skins Luck` == 0 ~ as.character(sprintf("%.1f", `Cumulative Skins Luck`)),
-          `Cumulative Skins Luck` > 0 ~ {
-            intensity <- (`Cumulative Skins Luck` / max_luck)
-            # Gradient from white (255,255,255) to green (144,238,144)
-            r_val <- as.integer(255 - (111 * intensity))
-            g_val <- as.integer(255 - (17 * intensity))
-            b_val <- as.integer(255 - (111 * intensity))
-            cell_spec(
-              sprintf("%.1f", `Cumulative Skins Luck`),
-              background = sprintf("rgb(%d, %d, %d)", r_val, g_val, b_val),
-              color = "#000000 !important",
-              bold = TRUE,
-              format = "html",
-              extra_css = "color: #000000 !important;"
-            )
-          },
-          `Cumulative Skins Luck` < 0 ~ {
-            intensity <- (abs(`Cumulative Skins Luck`) / abs(min_luck))
-            # Gradient from white (255,255,255) to red (255,182,198)
-            r_val <- 255
-            g_val <- as.integer(255 - (73 * intensity))
-            b_val <- as.integer(255 - (57 * intensity))
-            cell_spec(
-              sprintf("%.1f", `Cumulative Skins Luck`),
-              background = sprintf("rgb(%d, %d, %d)", r_val, g_val, b_val),
-              color = "#000000 !important",
-              bold = TRUE,
-              format = "html",
-              extra_css = "color: #000000 !important;"
-            )
-          }
-        )
-      )
-    ) %>%
-    select(Player, `Cumulative Skins Luck` = `Cumulative Skins Luck Display`, Games, 
-           `Total Expected Skins`, `Total Actual Skins`, `Expected Skins %`)
-  
-  knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(SEASON_LABEL, " Season-to-Date Cumulative Stats"), escape = FALSE, format = "html") %>%
-    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(2, bold = TRUE) %>%
-    row_spec(nrow(ytd_summary_with_total), bold = TRUE, background = "#444444")
-
 } else {
-  ytd_summary <- ytd_baseline %>%
-    select(Player, Cumulative_Skins_Luck, Games, Total_Expected_Skins, Total_Actual_Skins) %>%
-    mutate(
-      Expected_Skins_Pct = if_else(Games == 0, 0, (Total_Expected_Skins / Games) * 100)
-    ) %>%
-    rename(
-      `Total Expected Skins` = Total_Expected_Skins, `Total Actual Skins` = Total_Actual_Skins,
-      `Cumulative Skins Luck` = Cumulative_Skins_Luck, `Expected Skins %` = Expected_Skins_Pct
-    ) %>%
-    arrange(desc(`Cumulative Skins Luck`))
-  
-  # Add Total row for baseline
-  total_games <- sum(ytd_summary$Games)
-  total_expected <- sum(ytd_summary$`Total Expected Skins`)
-  total_actual <- sum(ytd_summary$`Total Actual Skins`)
-  total_luck <- sum(ytd_summary$`Cumulative Skins Luck`)
-  weighted_avg_expected_pct <- if_else(total_games == 0, 0, (total_expected / total_games) * 100)
-  
-  total_row <- data.frame(
-    Player = "TOTAL",
-    `Cumulative Skins Luck` = total_luck,
-    Games = total_games,
-    `Total Expected Skins` = total_expected,
-    `Total Actual Skins` = total_actual,
-    `Expected Skins %` = weighted_avg_expected_pct,
-    check.names = FALSE
-  )
-  
-  ytd_summary_with_total <- bind_rows(ytd_summary, total_row)
-  
-  # Apply gradient color to Cumulative Skins Luck column
-  max_luck <- max(ytd_summary$`Cumulative Skins Luck`, na.rm = TRUE)
-  min_luck <- min(ytd_summary$`Cumulative Skins Luck`, na.rm = TRUE)
-  
-  ytd_summary_with_total <- ytd_summary_with_total %>%
-    mutate(
-      `Cumulative Skins Luck Display` = if_else(
-        Player == "TOTAL",
-        as.character(sprintf("%.1f", `Cumulative Skins Luck`)),
-        case_when(
-          `Cumulative Skins Luck` == 0 ~ as.character(sprintf("%.1f", `Cumulative Skins Luck`)),
-          `Cumulative Skins Luck` > 0 ~ {
-            intensity <- (`Cumulative Skins Luck` / max_luck)
-            # Gradient from white (255,255,255) to green (144,238,144)
-            r_val <- as.integer(255 - (111 * intensity))
-            g_val <- as.integer(255 - (17 * intensity))
-            b_val <- as.integer(255 - (111 * intensity))
-            cell_spec(
-              sprintf("%.1f", `Cumulative Skins Luck`),
-              background = sprintf("rgb(%d, %d, %d)", r_val, g_val, b_val),
-              color = "#000000 !important",
-              bold = TRUE,
-              format = "html",
-              extra_css = "color: #000000 !important;"
-            )
-          },
-          `Cumulative Skins Luck` < 0 ~ {
-            intensity <- (abs(`Cumulative Skins Luck`) / abs(min_luck))
-            # Gradient from white (255,255,255) to red (255,182,198)
-            r_val <- 255
-            g_val <- as.integer(255 - (73 * intensity))
-            b_val <- as.integer(255 - (57 * intensity))
-            cell_spec(
-              sprintf("%.1f", `Cumulative Skins Luck`),
-              background = sprintf("rgb(%d, %d, %d)", r_val, g_val, b_val),
-              color = "#000000 !important",
-              bold = TRUE,
-              format = "html",
-              extra_css = "color: #000000 !important;"
-            )
-          }
-        )
-      )
-    ) %>%
-    select(Player, `Cumulative Skins Luck` = `Cumulative Skins Luck Display`, Games, 
-           `Total Expected Skins`, `Total Actual Skins`, `Expected Skins %`)
-    
-  knitr::kable(ytd_summary_with_total, digits = 1, align = 'c', caption = paste0(SEASON_LABEL, " Season-to-Date Cumulative Stats (Baseline)"), escape = FALSE, format = "html") %>%
-    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(2, bold = TRUE) %>%
-    row_spec(nrow(ytd_summary_with_total), bold = TRUE, background = "#444444")
+  ytd_baseline[0, ]
 }
+
+ytd_summary <- bind_rows(ytd_baseline, ytd_new_data) %>%
+  group_by(Player) %>%
+  summarise(
+    Games = sum(Games),
+    Expected = sum(Total_Expected_Skins),
+    Won = sum(Total_Actual_Skins),
+    Luck = sum(Cumulative_Skins_Luck),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(Luck))
+
+cat_html(paste0(
+  build_table(ytd_summary, list(
+    Games = function(r) as.character(r$Games),
+    Expected = function(r) sprintf("%.1f", r$Expected),
+    Won = function(r) as.character(r$Won),
+    Luck = function(r) luck_pill(r$Luck)
+  ), "sk-season-summary"),
+  "<p class='sk-note'>Finished games only. Luck = skins won minus expected skins.</p>"
+))
 ```
 
 ```{r ytd_charts}
@@ -2067,3 +1585,6 @@ p2 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Expected, color = Player, 
 print(p2)
 ```
 
+```{=html}
+</div></details>
+```
