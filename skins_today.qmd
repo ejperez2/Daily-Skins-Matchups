@@ -6,7 +6,7 @@ format:
     self-contained: true
     include-before-body:
       text: |
-        <nav style='font-size:15px; margin:0 0 6px 0; padding:6px 0; border-bottom:1px solid rgba(128,128,128,0.35);'><a href='https://ejperez2.github.io/skins-standings/' style='margin-right:14px;'>Standings</a><strong style='margin-right:14px;'>Daily Matchups</strong><button id='refresh-btn' type='button' style='display:none; font-size:13px; padding:2px 10px; cursor:pointer;'>Refresh now</button> <span id='refresh-msg' style='font-size:13px; opacity:0.85;'></span></nav>
+        <nav style='font-size:15px; margin:0 0 6px 0; padding:6px 0; border-bottom:1px solid rgba(128,128,128,0.35);'><a href='https://ejperez2.github.io/skins-standings/' style='margin-right:14px;'>Standings</a><strong style='margin-right:14px;'>Daily Matchups</strong><button id='refresh-btn' type='button' style='display:none; font-size:13px; padding:2px 10px; cursor:pointer; color:inherit; background:transparent; border:1px solid rgba(128,128,128,0.6); border-radius:4px;'>Refresh now</button> <span id='refresh-msg' style='font-size:13px; opacity:0.85;'></span></nav>
         <script>
         // Owner-only refresh: shown with ?admin (or once a token is saved). The GitHub token lives only in this browser's localStorage.
         (function () {
