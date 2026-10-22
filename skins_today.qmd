@@ -28,23 +28,43 @@ format:
         .sk-games { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 10px; }
         .sk-card { background: var(--sk-surface); border: 1px solid var(--sk-line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
         .sk-card.mine { background: var(--sk-mine); border-color: var(--sk-accent); }
-        .sk-card .top { display: flex; justify-content: space-between; font-size: 13px; color: var(--sk-muted); font-variant-numeric: tabular-nums; }
+        .sk-card .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; color: var(--sk-muted); font-variant-numeric: tabular-nums; }
+        .sk-card .top .status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+        .sk-card .badge { font-size: 10px; font-weight: 700; letter-spacing: .06em; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+        .sk-card .badge.zs { border: 1px solid var(--sk-accent); color: var(--sk-accent); }
+        .sk-card .badge.upset { background: var(--sk-accent); color: #1b1b1b; }
         .sk-card .top .live { color: var(--sk-bad); font-weight: 600; }
         .sk-card .top .live::before { content: "\25CF  "; }
         .sk-card .top .final { color: inherit; font-weight: 600; }
-        .sk-card .side { display: grid; grid-template-columns: 44px 1fr auto 48px; align-items: center; gap: 4px 10px; }
+        .sk-card .side { display: grid; grid-template-columns: 40px 1fr auto 42px 44px; align-items: center; gap: 4px 8px; }
+        .sk-card .chg { font-size: 13px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .sk-card .delta.up { color: var(--sk-good); }
+        .sk-card .delta.down { color: var(--sk-bad); }
         .sk-card .abbr { font-weight: 700; font-size: 20px; }
         .sk-card .owner { font-size: 15px; display: flex; gap: 6px; align-items: baseline; min-width: 0; }
         .sk-card .owner .pick { font-size: 11px; color: var(--sk-muted); border: 1px solid var(--sk-line); border-radius: 4px; padding: 0 4px; }
         .sk-card .side.me .owner { font-weight: 700; }
         .sk-card .side.won .name { background: var(--sk-good-bg); color: var(--sk-good); border-radius: 4px; padding: 0 5px; }
-        .sk-card .side.lost { opacity: .55; }
+        .sk-card .side.lost .abbr, .sk-card .side.lost .owner, .sk-card .side.lost .score { opacity: .55; }
         .sk-card .score { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
         .sk-card .pct { font-size: 18px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
-        .sk-card .barrow { grid-column: 2 / 4; height: 6px; background: var(--sk-bar); border-radius: 3px; overflow: hidden; }
-        .sk-card .barrow span { display: block; height: 100%; background: var(--sk-muted); border-radius: 3px; }
-        .sk-card .side.me .barrow span { background: var(--sk-accent); }
-        .sk-card .side.won .barrow span { background: var(--sk-good); }
+        .sk-card .barrow, .sk-card .tug { position: relative; height: 8px; background: var(--sk-bar); border-radius: 3px; }
+        .sk-card .barrow { grid-column: 2 / 4; }
+        .sk-card .barrow .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--sk-muted); border-radius: 3px; }
+        .sk-card .side.me .barrow .fill { background: var(--sk-accent); }
+        .sk-card .side.won .barrow .fill { background: var(--sk-good); }
+        .sk-card .gap { position: absolute; top: 0; bottom: 0; }
+        .sk-card .gap.gain { background: repeating-linear-gradient(135deg, var(--sk-good) 0 3px, transparent 3px 6px); }
+        .sk-card .gap.loss { background: repeating-linear-gradient(135deg, var(--sk-bad) 0 3px, transparent 3px 6px); }
+        .sk-card .gap.swing { background: repeating-linear-gradient(135deg, rgba(255,255,255,.55) 0 3px, transparent 3px 6px); }
+        .sk-card .tick { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: #fff; border-radius: 1px; }
+        .sk-card .tug { display: flex; height: 12px; margin: 2px 0 0 0; }
+        .sk-card .tug .seg { height: 100%; background: #8a8a8a; }
+        .sk-card .tug .seg + .seg { background: #555; }
+        .sk-card .tug .seg:first-child { border-radius: 3px 0 0 3px; }
+        .sk-card .tug .seg:nth-child(2) { border-radius: 0 3px 3px 0; }
+        .sk-card .tug .seg.me { background: var(--sk-accent); }
+        .sk-card .tug .seg.won { background: var(--sk-good); }
         .sk-card .foot { font-size: 12px; color: var(--sk-muted); border-top: 1px solid var(--sk-line); padding-top: 6px; }
         .sk-tablewrap { overflow-x: auto; background: var(--sk-surface); border: 1px solid var(--sk-line); border-radius: 10px; }
         table.sk-table { width: 100% !important; margin: 0; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 15px; }
@@ -63,7 +83,7 @@ format:
         details.sk-fold > .sk-inner { padding: 10px 12px; }
         details.sk-fold .sk-tablewrap { border: 0; }
         details.sk-fold img { max-width: 100%; height: auto; }
-        @media (max-width: 768px) { table { font-size: 12px; } th, td { padding: 4px !important; } .sk-table th, .sk-table td { padding: 7px 6px !important; } table.sk-table { font-size: 14px; } }
+        @media (max-width: 768px) { table { font-size: 12px; } th, td { padding: 4px !important; } .sk-table th, .sk-table td { padding: 7px 6px !important; } table.sk-table { font-size: 14px; } #sk-today-summary th, #sk-today-summary td { padding: 7px 4px !important; } }
         </style>
     include-before-body:
       text: |
@@ -119,7 +139,7 @@ format:
           function tile(k, v) { return "<div><div class='k'>" + k + "</div><div class='v'>" + v + "</div></div>"; }
           function pill(x) {
             var n = parseFloat(x), cls = n > 0.1 ? "pos" : n < -0.1 ? "neg" : "";
-            return "<span class='sk-pill " + cls + "'>" + (n > 0.05 ? "+" : "") + x + "</span>";
+            return "<span class='sk-pill " + cls + "'>" + (n > 0.05 ? "+" + x : Math.abs(n) < 0.05 ? "0.0" : x) + "</span>";
           }
 
           function apply() {
@@ -129,7 +149,7 @@ format:
               o.cards.forEach(function (c) {
                 var isMine = me !== "" && (" " + c.getAttribute("data-players") + " ").indexOf(" " + me + " ") >= 0;
                 c.classList.toggle("mine", isMine);
-                Array.prototype.forEach.call(c.querySelectorAll(".side"), function (s) { s.classList.toggle("me", me !== "" && s.getAttribute("data-player") === me); });
+                Array.prototype.forEach.call(c.querySelectorAll(".side, .tug .seg"), function (s) { s.classList.toggle("me", me !== "" && s.getAttribute("data-player") === me); });
                 (isMine ? mine : rest).push(c);
               });
               mine.concat(rest).forEach(function (c) { o.box.appendChild(c); });
@@ -150,6 +170,12 @@ format:
               (allPre ? tile("Expected skins", d.exp) : allFinal ? tile("Skins won", d.won) : tile("Live expected", d.live)) +
               tile("Luck", allPre ? "&ndash;" : pill(d.luck));
           }
+
+          // Remember which collapsible sections are open
+          Array.prototype.forEach.call(document.querySelectorAll("details.sk-fold[id]"), function (d) {
+            try { var v = localStorage.getItem("skinsFold:" + d.id); if (v !== null) d.open = v === "1"; } catch (e) {}
+            d.addEventListener("toggle", function () { try { localStorage.setItem("skinsFold:" + d.id, d.open ? "1" : "0"); } catch (e) {} });
+          });
 
           seg.addEventListener("click", function (e) {
             var b = e.target.closest("button");
@@ -906,11 +932,50 @@ to_ct <- function(s) {
   out
 }
 
+# Change vs pregame for a live chance, in percentage points ("▲19" / "▼19")
+fmt_delta <- function(now, pre) {
+  d <- round((now - pre) * 100)
+  if (is.na(d) || abs(d) < 1) return("")
+  paste0("<span class='delta ", if (d > 0) "up'>&#9650;" else "down'>&#9660;", abs(d), "</span>")
+}
+# Luck on a finished game: skin won (1/0) minus pregame chance
+fmt_luck <- function(won, pre) {
+  if (is.na(won) || is.na(pre)) return("")
+  l <- as.numeric(won) - pre
+  paste0("<span class='delta ", if (l >= 0) "up'>+" else "down'>&minus;", sprintf("%.2f", abs(l)), "</span>")
+}
+
+# Shaded band between the pregame tick and the current value, plus the tick itself
+swing_marks <- function(now, pre, cls) {
+  lo <- min(now, pre); hi <- max(now, pre)
+  sprintf("<span class='gap %s' style='left:%.1f%%;width:%.1f%%'></span><span class='tick' title='Pregame %.0f%%' style='left:%.1f%%'></span>",
+          cls, lo, hi - lo, pre, pre)
+}
+
+# Per-team bar (non zero-sum games): fill = current chance, tick = pregame
+side_bar <- function(chance, pre) {
+  now <- if (is.na(chance)) 0 else chance * 100
+  p <- if (is.na(pre)) now else pre * 100
+  paste0("<div class='barrow'><span class='fill' style='width:", sprintf("%.1f", now), "%'></span>",
+         swing_marks(now, p, if (now >= p) "gain" else "loss"), "</div>")
+}
+
+# Zero-sum tug-of-war: first team's share from the left, second team's from the right
+tug_bar <- function(g) {
+  a <- if (is.na(g$Chance[1])) 50 else g$Chance[1] * 100
+  p <- if (is.na(g$Expected[1])) a else g$Expected[1] * 100
+  seg <- function(i, w) {
+    cls <- paste0("seg", if (isTRUE(g$Won_Skin[i])) " won" else "")
+    sprintf("<span class='%s' data-player='%s' style='width:%.1f%%'></span>", cls, html_esc(g$Player[i]), w)
+  }
+  paste0("<div class='tug'>", seg(1, a), seg(2, 100 - a), swing_marks(a, p, "swing"), "</div>")
+}
+
 # One team row inside a card. `won` is TRUE/FALSE once the game is final, else NA.
-card_side <- function(abbr, player, pick, score, chance, won, state) {
+card_side <- function(abbr, player, pick, score, chance, pre, won, state, bar = TRUE) {
   cls <- paste0("side", if (isTRUE(won)) " won" else if (identical(won, FALSE)) " lost" else "")
   pct_txt <- if (state == "final") (if (isTRUE(won)) "&#10003;" else "") else fmt_pct(chance)
-  width <- if (is.na(chance)) 0 else round(chance * 100, 1)
+  change <- switch(state, final = fmt_luck(won, pre), live = fmt_delta(chance, pre), "")
   pick_word <- if (identical(pick, "L")) "lose" else "win"
   paste0(
     "<div class='", cls, "' data-player='", html_esc(player), "'>",
@@ -919,7 +984,8 @@ card_side <- function(abbr, player, pick, score, chance, won, state) {
     "<span class='pick' title='Picked to ", pick_word, "'>", html_esc(pick), "</span></div>",
     "<div class='score'>", if (is.na(score)) "" else score, "</div>",
     "<div class='pct'>", pct_txt, "</div>",
-    "<div></div><div class='barrow'><span style='width:", width, "%'></span></div>",
+    "<div class='chg'>", change, "</div>",
+    if (bar) paste0("<div></div>", side_bar(chance, pre)) else "",
     "</div>"
   )
 }
@@ -931,9 +997,17 @@ build_cards <- function(df, container_id) {
   games <- games[order(vapply(games, function(g) g$sort_key[1], numeric(1)))]
   cards <- vapply(games, function(g) {
     state <- g$State[1]
+    # Zero-sum: both owners need the same result (W/W or L/L), so exactly one skin is available
+    zero_sum <- nrow(g) == 2 && identical(g$Pick[1], g$Pick[2])
+    upset <- state == "final" && any(g$Won_Skin %in% TRUE & g$Expected < 0.5)
     sides <- vapply(seq_len(nrow(g)), function(i) {
-      card_side(g$Abbr[i], g$Player[i], g$Pick[i], g$Own_Score[i], g$Chance[i], g$Won_Skin[i], state)
+      card_side(g$Abbr[i], g$Player[i], g$Pick[i], g$Own_Score[i], g$Chance[i], g$Expected[i],
+                g$Won_Skin[i], state, bar = !zero_sum)
     }, character(1))
+    badges <- paste0(
+      if (zero_sum) "<span class='badge zs'>1 SKIN &middot; ZERO-SUM</span>" else "",
+      if (upset) "<span class='badge upset'>UPSET</span>" else ""
+    )
     label <- switch(state, final = "Skin", live = "Live skin chance", "Skin chance")
     foot <- if (state == "upcoming") {
       paste0("Expected skins: ", paste0(html_esc(g$Player), " ", sprintf("%.2f", g$Expected), collapse = " &middot; "))
@@ -942,8 +1016,10 @@ build_cards <- function(df, container_id) {
     }
     paste0(
       "<article class='sk-card' data-state='", state, "' data-players='", html_esc(paste(unique(g$Player), collapse = " ")), "'>",
-      "<div class='top'><span class='", state, "'>", html_esc(g$Status_Text[1]), "</span><span>", label, "</span></div>",
+      "<div class='top'><span class='status'><span class='", state, "'>", html_esc(g$Status_Text[1]), "</span>", badges, "</span>",
+      "<span>", label, "</span></div>",
       paste(sides, collapse = ""),
+      if (zero_sum) tug_bar(g) else "",
       "<div class='foot'>", foot, "</div>",
       "</article>"
     )
@@ -980,6 +1056,43 @@ cat_html(paste0(
   "<button type='button' data-me=''>All</button></span></div>",
   "<div class='sk-myday' id='sk-myday' hidden></div>"
 ))
+```
+
+```{r today_summary}
+#| echo: false
+#| message: false
+#| warning: false
+#| results: 'asis'
+
+# Today by player: Live counts a finished game as its actual skin, otherwise the live skin chance
+if (exists("todays_results") && nrow(todays_results) > 0) {
+  day_summary <- todays_results %>%
+    mutate(Live_Now = if_else(!is.na(Won_Game), Actual_Skins, coalesce(Live_Expected_Skins, `Expected Skins`))) %>%
+    group_by(Player) %>%
+    summarise(
+      Games = n(),
+      Expected = sum(`Expected Skins`, na.rm = TRUE),
+      Live = sum(Live_Now, na.rm = TRUE),
+      Won = sum(Actual_Skins, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(Luck = Live - Expected) %>%
+    arrange(desc(Luck))
+
+  cat_html(paste0(
+    "<details class='sk-fold' id='fold-today' open><summary>Today by player</summary><div class='sk-inner'>",
+    build_table(day_summary, list(
+      G = function(r) as.character(r$Games),
+      Exp = function(r) sprintf("%.1f", r$Expected),
+      Live = function(r) sprintf("%.1f", r$Live),
+      `Live %` = function(r) paste0(round(100 * r$Live / r$Games), "%"),
+      Won = function(r) as.character(r$Won),
+      Luck = function(r) luck_pill(r$Luck)
+    ), "sk-today-summary", data_attrs = TRUE),
+    "<p class='sk-note'>Live % = live expected skins per game. Luck = live expected skins minus pregame expected skins.</p>",
+    "</div></details>"
+  ))
+}
 ```
 
 ```{r todays_games}
@@ -1178,43 +1291,8 @@ if (nrow(todays_picks) > 0) {
 }
 ```
 
-```{r today_summary}
-#| echo: false
-#| message: false
-#| warning: false
-#| results: 'asis'
-
-# Today by player: Live counts a finished game as its actual skin, otherwise the live skin chance
-if (exists("todays_results") && nrow(todays_results) > 0) {
-  day_summary <- todays_results %>%
-    mutate(Live_Now = if_else(!is.na(Won_Game), Actual_Skins, coalesce(Live_Expected_Skins, `Expected Skins`))) %>%
-    group_by(Player) %>%
-    summarise(
-      Games = n(),
-      Expected = sum(`Expected Skins`, na.rm = TRUE),
-      Live = sum(Live_Now, na.rm = TRUE),
-      Won = sum(Actual_Skins, na.rm = TRUE),
-      .groups = "drop"
-    ) %>%
-    mutate(Luck = Live - Expected) %>%
-    arrange(desc(Luck))
-
-  cat_html(paste0(
-    "<h2 class='sk-h'>Today by player</h2>",
-    build_table(day_summary, list(
-      Games = function(r) as.character(r$Games),
-      Expected = function(r) sprintf("%.1f", r$Expected),
-      Live = function(r) sprintf("%.1f", r$Live),
-      Won = function(r) as.character(r$Won),
-      Luck = function(r) luck_pill(r$Luck)
-    ), "sk-today-summary", data_attrs = TRUE),
-    "<p class='sk-note'>Luck = live expected skins minus pregame expected skins.</p>"
-  ))
-}
-```
-
 ```{=html}
-<details class="sk-fold"><summary>Odds by team</summary><div class="sk-inner">
+<details class="sk-fold" id="fold-odds"><summary>Odds by team</summary><div class="sk-inner">
 ```
 
 ```{r expected_team_table}
@@ -1239,7 +1317,7 @@ if (nrow(todays_picks) > 0) {
 ```
 
 ```{=html}
-<details class="sk-fold"><summary>Yesterday</summary><div class="sk-inner">
+<details class="sk-fold" id="fold-yesterday"><summary>Yesterday</summary><div class="sk-inner">
 ```
 
 ```{r yesterday_matchup_table}
@@ -1396,7 +1474,7 @@ if (file.exists(yesterday_file)) {
 ```
 
 ```{=html}
-<details class="sk-fold"><summary>Season to date</summary><div class="sk-inner">
+<details class="sk-fold" id="fold-season"><summary>Season to date</summary><div class="sk-inner">
 ```
 
 ```{r ytd_setup}
