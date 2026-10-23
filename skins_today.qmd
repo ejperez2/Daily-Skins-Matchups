@@ -83,6 +83,23 @@ format:
         details.sk-fold > .sk-inner { padding: 10px 12px; }
         details.sk-fold .sk-tablewrap { border: 0; }
         details.sk-fold img { max-width: 100%; height: auto; }
+        .sk-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex: none; }
+        .sk-chart { background: var(--sk-surface); border: 1px solid var(--sk-line); border-radius: 10px; padding: 10px 12px 8px 12px; }
+        details.sk-fold .sk-chart { border: 0; padding: 0; }
+        .sk-ctabs { display: flex; overflow-x: auto; margin-bottom: 8px; }
+        .sk-cttl { font-size: 15px; font-weight: 700; }
+        .sk-cdsc { font-size: 12.5px; color: var(--sk-muted); margin: 0 0 6px 0; }
+        .sk-cleg { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; margin-bottom: 4px; }
+        .sk-cleg span { display: inline-flex; align-items: center; gap: 6px; }
+        .sk-plot { position: relative; touch-action: pan-y; }
+        .sk-plot svg { display: block; width: 100%; }
+        .sk-plot svg text { fill: var(--sk-muted); font-size: 11px; }
+        .sk-plot svg text.sk-end { fill: var(--bs-body-color, #fff); font-size: 12px; font-weight: 600; }
+        .sk-tip { position: absolute; top: 0; pointer-events: none; background: #111; border: 1px solid var(--sk-line); border-radius: 6px; padding: 6px 8px; font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; z-index: 2; }
+        .sk-tip div { display: flex; align-items: center; gap: 6px; }
+        .sk-tip b { margin-left: auto; padding-left: 10px; }
+        .sk-tip[hidden] { display: none; }
+        .sk-empty { padding: 36px 8px; text-align: center; color: var(--sk-muted); font-size: 14px; }
         @media (max-width: 768px) { table { font-size: 12px; } th, td { padding: 4px !important; } .sk-table th, .sk-table td { padding: 7px 6px !important; } table.sk-table { font-size: 14px; } #sk-today-summary th, #sk-today-summary td { padding: 7px 4px !important; } }
         </style>
     include-before-body:
@@ -190,6 +207,109 @@ format:
           if (document.querySelector("#sk-today-games .sk-card[data-state='live']")) {
             setInterval(function () { if (document.visibilityState === "visible") location.reload(); }, 5 * 60 * 1000);
           }
+        })();
+        // Season charts: hover or tap for each day's values (same style as the Standings page)
+        (function () {
+          var el = document.getElementById("sk-chart-data"), plot = document.getElementById("sk-plot");
+          if (!el || !plot) return;
+          var D = JSON.parse(el.textContent), PLAYERS = D.players, COLORS = D.colors, H = D.hist;
+          var tabs = document.getElementById("sk-ctabs");
+          function esc(x) { return String(x).replace(/[&<>"]/g, function (ch) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]; }); }
+          function dot(p) { return '<span class="sk-dot" style="--c:' + COLORS[p] + '"></span>'; }
+          var f1 = function (v) { return v.toFixed(1); };
+          var CH = {
+            luck: { ttl: "Cumulative skins luck", dsc: "Skins won minus expected skins. Above zero means luckier than the odds said.",
+              key: "luck", zero: true, fmt: function (v) { return (v > 0.05 ? "+" : "") + v.toFixed(1); } },
+            exp: { ttl: "Expected skins", dsc: "Running total of pregame expected skins.", key: "exp", fmt: f1 },
+            won: { ttl: "Skins won", dsc: "Running total of skins won.", key: "won", fmt: function (v) { return v.toFixed(0); }, tip: function (v) { return v.toFixed(0); } }
+          };
+          var state = "luck";
+
+          function niceTicks(a, b) {
+            if (a === b) { a -= 1; b += 1; }
+            var step0 = (b - a) / 4, mag = Math.pow(10, Math.floor(Math.log10(step0)));
+            var step = [1, 2, 2.5, 5, 10].map(function (m) { return m * mag; }).filter(function (s) { return s >= step0; })[0];
+            var t = []; for (var v = Math.floor(a / step) * step; v <= b + step * 1e-6; v += step) t.push(+v.toFixed(6));
+            if (t[t.length - 1] < b) t.push(+(t[t.length - 1] + step).toFixed(6));
+            return t;
+          }
+
+          function draw() {
+            if (!plot.clientWidth) return;  // inside a closed section; drawn when opened
+            var c = CH[state], me = "";
+            try { me = localStorage.getItem("skinsMe") || ""; } catch (e) {}
+            tabs.querySelectorAll("button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-c") === state)); });
+            document.getElementById("sk-cttl").textContent = c.ttl;
+            document.getElementById("sk-cdsc").textContent = c.dsc;
+            document.getElementById("sk-cleg").innerHTML = PLAYERS.map(function (p) { return "<span>" + dot(p) + esc(p) + "</span>"; }).join("");
+            if (H.length < 2) { plot.innerHTML = '<div class="sk-empty">Starts once the first games go final.</div>'; return; }
+
+            var series = PLAYERS.map(function (p) { return { p: p, v: H.map(function (h) { var r = h.r[p]; return r ? r[c.key] : null; }) }; });
+            var vals = []; series.forEach(function (s) { s.v.forEach(function (v) { if (v != null) vals.push(v); }); });
+            var W = Math.max(280, plot.clientWidth), Hh = Math.round(Math.min(320, Math.max(220, W * 0.58)));
+            var m = { l: 44, r: 76, t: 10, b: 24 };
+            var y0 = Math.min.apply(null, vals), y1 = Math.max.apply(null, vals);
+            if (c.zero) { y0 = Math.min(y0, 0); y1 = Math.max(y1, 0); }
+            var yt = niceTicks(y0, y1); y0 = Math.min(y0, yt[0]); y1 = Math.max(y1, yt[yt.length - 1]);
+            var n = H.length;
+            var t = H.map(function (h) { return new Date(h.d + "T12:00:00").getTime(); }), t0 = t[0], t1 = t[n - 1];
+            var xs = function (i) { return m.l + (t1 === t0 ? 0.5 : (t[i] - t0) / (t1 - t0)) * (W - m.l - m.r); };
+            var ys = function (v) { return m.t + (1 - (v - y0) / ((y1 - y0) || 1)) * (Hh - m.t - m.b); };
+            var fmtD = function (d) { return new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+            var xIdx = n <= 4 ? H.map(function (_, i) { return i; }) : [0, Math.round((n - 1) / 3), Math.round(2 * (n - 1) / 3), n - 1];
+            var line = function (arr) {
+              var d = "", on = false;
+              arr.forEach(function (v, i) { if (v == null) { on = false; return; } d += (on ? "L" : "M") + xs(i).toFixed(1) + " " + ys(v).toFixed(1); on = true; });
+              return d;
+            };
+            var svg = '<svg width="' + W + '" height="' + Hh + '" viewBox="0 0 ' + W + " " + Hh + '" role="img" aria-label="' + esc(c.ttl) + ' chart">';
+            yt.forEach(function (v) {
+              var z = c.zero && v === 0;
+              svg += '<line x1="' + m.l + '" x2="' + (W - m.r) + '" y1="' + ys(v) + '" y2="' + ys(v) + '" stroke="' + (z ? "#888" : "#3a3a3a") + '" stroke-width="1"/>' +
+                '<text x="' + (m.l - 6) + '" y="' + (ys(v) + 4) + '" text-anchor="end">' + c.fmt(v) + "</text>";
+            });
+            xIdx.forEach(function (i) {
+              svg += '<text x="' + xs(i) + '" y="' + (Hh - 6) + '" text-anchor="' + (i === 0 ? "start" : i === n - 1 ? "end" : "middle") + '">' + fmtD(H[i].d) + "</text>";
+            });
+            series.forEach(function (s) {
+              svg += '<path d="' + line(s.v) + '" fill="none" stroke="' + COLORS[s.p] + '" stroke-width="' + (s.p === me ? 3 : 2) + '" stroke-linejoin="round" stroke-linecap="round"/>';
+            });
+            var ends = [];
+            series.forEach(function (s) { var last = -1; s.v.forEach(function (v, i) { if (v != null) last = i; }); if (last >= 0) ends.push({ s: s, i: last, y: ys(s.v[last]) }); });
+            ends.sort(function (a, b) { return a.y - b.y; });
+            for (var k = 1; k < ends.length; k++) if (ends[k].y - ends[k - 1].y < 15) ends[k].y = ends[k - 1].y + 15;
+            ends.forEach(function (e) {
+              svg += '<circle cx="' + xs(e.i) + '" cy="' + ys(e.s.v[e.i]) + '" r="4" fill="' + COLORS[e.s.p] + '" stroke="#2b2b2b" stroke-width="2"/>' +
+                '<text class="sk-end" x="' + (xs(e.i) + 8) + '" y="' + (e.y + 4) + '">' + esc(e.s.p.slice(0, 3)) + " " + c.fmt(e.s.v[e.i]) + "</text>";
+            });
+            svg += '<line class="sk-xh" y1="' + m.t + '" y2="' + (Hh - m.b) + '" stroke="#888" stroke-width="1" visibility="hidden"/>' +
+              '<rect class="sk-hit" x="' + m.l + '" y="0" width="' + (W - m.l - m.r) + '" height="' + Hh + '" fill="transparent"/></svg>';
+            plot.innerHTML = svg + '<div class="sk-tip" hidden></div>';
+
+            var hit = plot.querySelector(".sk-hit"), xh = plot.querySelector(".sk-xh"), tip = plot.querySelector(".sk-tip");
+            var show = function (e) {
+              var x = e.clientX - plot.getBoundingClientRect().left, best = 0;
+              for (var i = 1; i < n; i++) if (Math.abs(xs(i) - x) < Math.abs(xs(best) - x)) best = i;
+              var rows = series.map(function (s) { return { p: s.p, v: s.v[best] }; }).filter(function (r) { return r.v != null; }).sort(function (a, b) { return b.v - a.v; });
+              xh.setAttribute("x1", xs(best)); xh.setAttribute("x2", xs(best)); xh.setAttribute("visibility", "visible");
+              var tf = c.tip || c.fmt;
+              tip.innerHTML = '<div style="color:var(--sk-muted)">' + fmtD(H[best].d) + "</div>" +
+                rows.map(function (r) { return "<div>" + dot(r.p) + esc(r.p) + "<b>" + tf(r.v) + "</b></div>"; }).join("");
+              tip.hidden = false;
+              var tw = tip.offsetWidth;
+              tip.style.left = Math.max(0, Math.min(W - tw, xs(best) + (xs(best) > W / 2 ? -tw - 10 : 10))) + "px";
+            };
+            hit.addEventListener("pointermove", show);
+            hit.addEventListener("pointerdown", show);
+            hit.addEventListener("pointerleave", function () { tip.hidden = true; xh.setAttribute("visibility", "hidden"); });
+          }
+
+          tabs.addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) { state = b.getAttribute("data-c"); draw(); } });
+          var fold = document.getElementById("fold-season");
+          if (fold) fold.addEventListener("toggle", draw);
+          document.getElementById("sk-me").addEventListener("click", function () { setTimeout(draw, 0); });
+          var rz; window.addEventListener("resize", function () { clearTimeout(rz); rz = setTimeout(draw, 120); });
+          draw();
         })();
         </script>
     theme: darkly
@@ -1566,8 +1686,7 @@ cat_html(paste0(
 #| echo: false
 #| message: false
 #| warning: false
-#| fig-width: 10
-#| fig-height: 6
+#| results: 'asis'
 
 # Always generate charts - use baseline + any new data
 # Create baseline starting point for charts
@@ -1612,55 +1731,40 @@ if (exists("ytd_data") && nrow(ytd_data) > 0) {
     )
 }
 
-# Chart 1: Cumulative Skins Luck Over Time
-p1 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Luck, color = Player, group = Player)) +
-  geom_line(size = 1.2) + geom_point(size = 2) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
-  labs(title = "Cumulative Skins Luck Over Time", x = "Date", y = "Cumulative Skins Luck", color = "Player") +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
-    legend.position = "bottom",
-    legend.text = element_text(size = 14),  # INCREASED legend text size
-    legend.title = element_text(size = 14, face = "bold"),  # INCREASED legend title size
-    text = element_text(colour = "#FFFFFF"),
-    axis.text = element_text(colour = "#FFFFFF"),
-    axis.title = element_text(colour = "#FFFFFF"),
-    plot.background = element_rect(fill = "#222222", color = NA),
-    panel.background = element_rect(fill = "#222222", color = NA),
-    legend.background = element_rect(fill = "#222222", color = NA),
-    legend.key = element_rect(fill = "#222222", color = NA),
-    panel.grid.major = element_line(color = "#444444"),
-    panel.grid.minor = element_line(color = "#333333")
-  ) +
-  scale_color_brewer(palette = "Set2")
+# Interactive charts (drawn in the browser): one point per player per day, carried forward on days off
+chart_long <- bind_rows(baseline_start, if (nrow(ytd_data) > 0) daily_data_summarized) %>%
+  group_by(Player, Date) %>%
+  summarise(across(c(Daily_Expected, Daily_Actual, Daily_Luck), sum), .groups = "drop") %>%
+  complete(Player = PLAYERS, Date, fill = list(Daily_Expected = 0, Daily_Actual = 0, Daily_Luck = 0)) %>%
+  arrange(Player, Date) %>%
+  group_by(Player) %>%
+  mutate(luck = cumsum(Daily_Luck), exp = cumsum(Daily_Expected), won = cumsum(Daily_Actual)) %>%
+  ungroup()
 
-print(p1)
-cat("\n\n")
+chart_dates <- sort(unique(chart_long$Date))
+hist_json <- vapply(seq_along(chart_dates), function(i) {
+  rows <- chart_long[chart_long$Date == chart_dates[i], ]
+  paste0('{"d":"', format(chart_dates[i]), '","r":{',
+         paste(sprintf('"%s":{"luck":%.3f,"exp":%.3f,"won":%d}', rows$Player, rows$luck, rows$exp, as.integer(rows$won)), collapse = ","),
+         "}}")
+}, character(1))
+# Same player colors as the Standings page
+player_colors <- c(Eristeo = "#3E97D6", Brian = "#E26A54", Adam = "#22A794")
 
-# Chart 2: Total Expected Skins Over Time
-p2 <- ggplot(chart_data, aes(x = Date, y = Cumulative_Expected, color = Player, group = Player)) +
-  geom_line(size = 1.2) + geom_point(size = 2) +
-  labs(title = "Total Expected Skins Over Time", x = "Date", y = "Cumulative Expected Skins", color = "Player") +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
-    legend.position = "bottom",
-    legend.text = element_text(size = 14),  # INCREASED legend text size
-    legend.title = element_text(size = 14, face = "bold"),  # INCREASED legend title size
-    text = element_text(colour = "#FFFFFF"),
-    axis.text = element_text(colour = "#FFFFFF"),
-    axis.title = element_text(colour = "#FFFFFF"),
-    plot.background = element_rect(fill = "#222222", color = NA),
-    panel.background = element_rect(fill = "#222222", color = NA),
-    legend.background = element_rect(fill = "#222222", color = NA),
-    legend.key = element_rect(fill = "#222222", color = NA),
-    panel.grid.major = element_line(color = "#444444"),
-    panel.grid.minor = element_line(color = "#333333")
-  ) +
-  scale_color_brewer(palette = "Set2")
-
-print(p2)
+cat_html(paste0(
+  "<h2 class='sk-h'>Season charts</h2>",
+  "<div class='sk-chart' id='sk-chart'><div class='sk-ctabs'><span class='sk-seg' id='sk-ctabs'>",
+  "<button type='button' data-c='luck' aria-pressed='true'>Luck</button>",
+  "<button type='button' data-c='exp'>Expected</button>",
+  "<button type='button' data-c='won'>Won</button></span></div>",
+  "<div class='sk-cttl' id='sk-cttl'></div><p class='sk-cdsc' id='sk-cdsc'></p>",
+  "<div class='sk-cleg' id='sk-cleg'></div>",
+  "<div class='sk-plot' id='sk-plot'><div class='sk-empty'>Charts need JavaScript.</div></div></div>",
+  "<script type='application/json' id='sk-chart-data'>{\"players\":[",
+  paste0('"', PLAYERS, '"', collapse = ","), "],\"colors\":{",
+  paste0('"', names(player_colors), '":"', player_colors, '"', collapse = ","), "},\"hist\":[",
+  paste(hist_json, collapse = ","), "]}</script>"
+))
 ```
 
 ```{=html}
