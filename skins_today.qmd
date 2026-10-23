@@ -26,7 +26,10 @@ format:
         .sk-myday .v { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
         .sk-h { font-size: 15px; text-transform: uppercase; letter-spacing: .08em; color: var(--sk-muted); margin: 20px 0 8px 0; font-weight: 700; }
         .sk-games { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 10px; }
-        .sk-card { background: var(--sk-surface); border: 1px solid var(--sk-line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+        .sk-card { position: relative; background: var(--sk-surface); border: 1px solid var(--sk-line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+        .sk-card .sk-stretch { position: absolute; inset: 0; z-index: 1; border-radius: 10px; }
+        .sk-card .sk-stretch:focus-visible { outline: 2px solid var(--sk-accent); outline-offset: 2px; }
+        @media (hover: hover) { .sk-card:hover { border-color: #777; } .sk-card.mine:hover { border-color: var(--sk-accent); } }
         .sk-card.mine { background: var(--sk-mine); border-color: var(--sk-accent); }
         .sk-card .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; color: var(--sk-muted); font-variant-numeric: tabular-nums; }
         .sk-card .top .status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -1110,9 +1113,27 @@ card_side <- function(abbr, player, pick, score, chance, pre, won, state, bar = 
   )
 }
 
+# ESPN game page for each team playing on `date` (named by our abbreviations); empty if ESPN is unreachable
+espn_links <- function(date) {
+  tryCatch({
+    sb <- jsonlite::fromJSON(paste0("https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=",
+                                    format(date, "%Y%m%d")), simplifyVector = FALSE)
+    fix <- c(GS = "GSW", NY = "NYK", SA = "SAS", NO = "NOP", UTAH = "UTA", WSH = "WAS")
+    out <- character()
+    for (ev in sb$events) {
+      for (cmp in ev$competitions[[1]]$competitors) {
+        ab <- cmp$team$abbreviation
+        out[if (ab %in% names(fix)) fix[[ab]] else ab] <- paste0("https://www.espn.com/nba/game/_/gameId/", ev$id)
+      }
+    }
+    out
+  }, error = function(e) character())
+}
+
 # df: one row per drafted team with game_id, Player, Abbr, Pick, Expected (pregame skin chance),
 # Chance (live skin chance), Won_Skin, Own_Score, State (upcoming/live/final), Status_Text, sort_key
-build_cards <- function(df, container_id) {
+# links: from espn_links(); cards fall back to that day's ESPN scoreboard
+build_cards <- function(df, container_id, links = character(), date = Sys.Date()) {
   games <- split(df, df$game_id)
   games <- games[order(vapply(games, function(g) g$sort_key[1], numeric(1)))]
   cards <- vapply(games, function(g) {
@@ -1134,8 +1155,10 @@ build_cards <- function(df, container_id) {
     } else {
       paste0("Pregame: ", paste0(html_esc(g$Abbr), " ", fmt_pct(g$Expected), collapse = " / "))
     }
+    href <- unname(c(links[intersect(g$Abbr, names(links))], paste0("https://www.espn.com/nba/scoreboard/_/date/", format(date, "%Y%m%d")))[1])
     paste0(
       "<article class='sk-card' data-state='", state, "' data-players='", html_esc(paste(unique(g$Player), collapse = " ")), "'>",
+      "<a class='sk-stretch' href='", href, "' target='_blank' rel='noopener' aria-label='Open ", html_esc(paste(g$Abbr, collapse = " vs ")), " on ESPN'></a>",
       "<div class='top'><span class='status'><span class='", state, "'>", html_esc(g$Status_Text[1]), "</span>", badges, "</span>",
       "<span>", label, "</span></div>",
       paste(sides, collapse = ""),
@@ -1405,7 +1428,7 @@ if (nrow(todays_picks) > 0) {
       )
     )
 
-  cat_html(build_cards(card_data, "sk-today-games"))
+  cat_html(build_cards(card_data, "sk-today-games", espn_links(today_ct), today_ct))
 } else {
   cat("No games scheduled for today.")
 }
@@ -1572,7 +1595,7 @@ if (file.exists(yesterday_file)) {
 
         cat_html(paste0(
           "<p class='sk-meta'>", format(yesterday_ct, "%A, %B %d"), "</p>",
-          build_cards(yesterday_cards, "sk-yesterday-games"),
+          build_cards(yesterday_cards, "sk-yesterday-games", espn_links(yesterday_ct), yesterday_ct),
           "<h2 class='sk-h'>Yesterday by player</h2>",
           build_table(yesterday_summary, list(
             Games = function(r) as.character(r$Games),
