@@ -43,6 +43,8 @@ jobs:
     needs: gate
     if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
+    # A normal run takes 2-4 minutes; fail a hung one (e.g. a stalled R download) so the next update can go
+    timeout-minutes: 15
     # One render at a time, so a manual refresh during a scheduled run waits instead of racing it
     concurrency:
       group: render-skins
