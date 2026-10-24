@@ -113,35 +113,19 @@ format:
       text: |
         <nav class='sk-nav'><a href='https://ejperez2.github.io/skins-standings/'>Standings</a><strong>Daily Matchups</strong><button id='refresh-btn' class='sk-btn' type='button' style='display:none;'>Refresh now</button><span id='refresh-msg' style='font-size:13px; opacity:0.85;'></span></nav>
         <script>
-        // Owner-only refresh: shown with ?admin (or once a token is saved). The GitHub token lives only in this browser's localStorage.
+        // Refresh: asks the Cloudflare Worker (which holds the GitHub token) to start an update. No token needed here.
         (function () {
-          var KEY = "skinsRefreshToken";
-          var URL = "https://api.github.com/repos/ejperez2/Daily-Skins-Matchups/actions/workflows/render-skins.yml/dispatches";
+          var URL = "https://skins-refresh.ejperez2.workers.dev/?repo=Daily-Skins-Matchups";
           var btn = document.getElementById("refresh-btn"), msg = document.getElementById("refresh-msg");
-          var params = new URLSearchParams(location.search);
-          function get() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
-          function set(v) { try { v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY); } catch (e) {} }
-          if (params.get("admin") === "reset") { set(null); msg.textContent = "Saved token removed."; }
-          if (!params.has("admin") && !get()) return;
+          try { localStorage.removeItem("skinsRefreshToken"); } catch (e) {}  // token from the old owner-only button
           btn.style.display = "inline-block";
           btn.onclick = function () {
-            var token = get();
-            if (!token) {
-              token = (prompt("Paste your GitHub token (saved only in this browser):") || "").trim();
-              if (!token) return;
-              set(token);
-            }
             btn.disabled = true; msg.textContent = "Starting...";
-            fetch(URL, {
-              method: "POST",
-              headers: { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json" },
-              body: JSON.stringify({ ref: "main" })
-            }).then(function (r) {
-              if (r.status === 204) { msg.textContent = "Refresh started - reload in about 4 minutes."; return; }
-              if (r.status === 401 || r.status === 403 || r.status === 404) { set(null); msg.textContent = "Token rejected (" + r.status + ") - tap again to enter a new one."; }
-              else { msg.textContent = "GitHub error " + r.status + "."; }
-              btn.disabled = false;
-            }).catch(function () { msg.textContent = "Network error."; btn.disabled = false; });
+            fetch(URL, { method: "POST" })
+              .then(function (r) { return r.json().catch(function () { return { msg: "Error " + r.status + "." }; }); })
+              .then(function (d) { msg.textContent = d.msg || "Done."; })
+              .catch(function () { msg.textContent = "Network error - try again."; })
+              .then(function () { setTimeout(function () { btn.disabled = false; }, 30000); });
           };
         })();
         </script>
