@@ -321,6 +321,25 @@ history_dir <- "skins_history"
 if (!dir.exists(history_dir)) {
   dir.create(history_dir, recursive = TRUE)
 }
+
+# plaintextsports score boxes (the lines starting with "+") for one date.
+# Its undated /nba/ page doesn't roll over until ~5 AM ET, so early-morning runs would read last
+# night's finals as today's - always ask for the date. The dated URL for plaintextsports' own
+# "today" is just a redirect to /nba/, so then read /nba/ and check it really shows `date`.
+scoreboard_lines <- function(date) {
+  box_lines <- function(page) {
+    lines <- strsplit(page %>% html_element("body") %>% html_text2(), "\n")[[1]]
+    lines[grepl("^\\+", lines)]
+  }
+  page <- read_html(paste0("https://plaintextsports.com/nba/", date, "/"))
+  if (length(box_lines(page)) == 0 && !is.na(html_element(page, "#redirect"))) {
+    page <- read_html("https://plaintextsports.com/nba/")
+    # Day nav: "< Oct. 27" and "Oct. 29 >" links either side of the page's date
+    nav <- html_attr(html_elements(page, "a.nav"), "href")
+    if (!all(paste0("/nba/", c(date - 1, date + 1), "/") %in% nav)) return(character())
+  }
+  box_lines(page)
+}
 ```
 
 ```{r timestamp}
@@ -865,18 +884,8 @@ if (!"Live_Expected_Skins" %in% names(todays_picks)) {
 if (nrow(todays_picks) > 0) {
   
   # Always scrape plaintextsports regardless of blackout window
-  # 1. Scrape plaintextsports.com for live game data
-  url_scores <- "https://plaintextsports.com/nba/"
-  page_scores <- read_html(url_scores)
-  
-  # Get all text from the body
-  all_text <- page_scores %>%
-    html_element("body") %>%
-    html_text2()
-  
-  # 2. Extract Game Blocks - Split into lines and get score boxes
-  all_lines <- strsplit(all_text, "\n")[[1]]
-  score_boxes <- all_lines[grepl("^\\+", all_lines)]
+  # 1-2. Score boxes for today's skins date from plaintextsports.com
+  score_boxes <- scoreboard_lines(today_ct)
   
   # 3. Parse a single game box
   parse_game_box <- function(box) {
@@ -1237,17 +1246,7 @@ cat_html("<h2 class='sk-h'>Games</h2>")
 if (nrow(todays_picks) > 0) {
   
   # Scrape plaintextsports.com for game results
-  url_scores <- "https://plaintextsports.com/nba/"
-  page_scores <- read_html(url_scores)
-  
-  # Get all text
-  all_text <- page_scores %>%
-    html_element("body") %>%
-    html_text2()
-  
-  # Extract score boxes
-  all_lines <- strsplit(all_text, "\n")[[1]]
-  score_boxes <- all_lines[grepl("^\\+", all_lines)]
+  score_boxes <- scoreboard_lines(today_ct)
   
   # Parse game boxes
   parse_game_box <- function(box) {
@@ -1467,11 +1466,7 @@ if (file.exists(yesterday_file)) {
   if (nrow(yesterday_data) > 0) {
     
     # Scrape yesterday's actual matchups from date-specific URL
-    yesterday_url <- paste0("https://plaintextsports.com/nba/", yesterday_ct, "/")
-    yesterday_page <- read_html(yesterday_url)
-    yesterday_text <- yesterday_page %>% html_element("body") %>% html_text2()
-    yesterday_lines <- strsplit(yesterday_text, "\n")[[1]]
-    yesterday_boxes <- yesterday_lines[grepl("^\\+", yesterday_lines)]
+    yesterday_boxes <- scoreboard_lines(yesterday_ct)
     
     # Parse game boxes to get actual matchups and scores
     parse_game_box <- function(box) {
@@ -1537,7 +1532,28 @@ if (file.exists(yesterday_file)) {
       if (!"Final_Score" %in% names(yesterday_data)) {
         yesterday_data <- yesterday_data %>% mutate(Final_Score = NA_character_)
       }
-      
+
+      # A late tip can finish after the last game-night run, leaving no result in yesterday's
+      # file - fill in any that are now final and save it, so the season totals count them
+      yesterday_won_lookup <- bind_rows(
+        finished_yesterday %>% transmute(Abbr = Team1, Won_New = Score1 > Score2),
+        finished_yesterday %>% transmute(Abbr = Team2, Won_New = Score2 > Score1)
+      )
+      yesterday_filled <- yesterday_data %>%
+        left_join(yesterday_won_lookup, by = "Abbr") %>%
+        left_join(yesterday_score_lookup, by = "Abbr") %>%
+        mutate(
+          fill = is.na(Won_Game) & !is.na(Won_New),
+          Won_Game = if_else(fill, Won_New, as.logical(Won_Game)),
+          Actual_Skins = if_else(fill, as.numeric((Pick == "W") == Won_New), as.numeric(Actual_Skins)),
+          Skins_Luck = if_else(fill, Actual_Skins - Expected_Skins, as.numeric(Skins_Luck)),
+          Final_Score = if_else(fill, Scraped_Score, coalesce(as.character(Final_Score), ""))
+        )
+      if (any(yesterday_filled$fill)) {
+        yesterday_data <- yesterday_filled %>% select(all_of(names(yesterday_data)))
+        write_csv(yesterday_data, yesterday_file)
+      }
+
       yesterday_with_game <- yesterday_data %>%
         left_join(team_to_game, by = "Abbr") %>%
         left_join(yesterday_score_lookup, by = "Abbr") %>%
