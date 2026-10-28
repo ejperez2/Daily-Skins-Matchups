@@ -340,6 +340,62 @@ scoreboard_lines <- function(date) {
   }
   box_lines(page)
 }
+
+# Score boxes -> one row per game: Team1, Team2 (our abbreviations), Score1, Score2, Status, Finished
+parse_scoreboard <- function(boxes) {
+  fix <- c("^GS$" = "GSW", "^NO$" = "NOP", "^NY$" = "NYK", "^SA$" = "SAS", "^WSH$" = "WAS")
+  bind_rows(lapply(boxes, function(box) {
+    parts <- str_trim(strsplit(box, "\\|")[[1]])
+    data.frame(
+      Team1 = str_replace_all(str_extract(parts[4], "[A-Z]{2,3}"), fix),
+      Team2 = str_replace_all(str_extract(parts[6], "[A-Z]{2,3}"), fix),
+      Score1 = suppressWarnings(as.numeric(str_extract(parts[4], "[0-9]+$"))),
+      Score2 = suppressWarnings(as.numeric(str_extract(parts[6], "[0-9]+$"))),
+      Status = parts[2],
+      Finished = grepl("Final", parts[2], fixed = TRUE),
+      stringsAsFactors = FALSE
+    )
+  }))
+}
+
+# Drop scoreboard games that don't match our schedule: a team's result only counts against the
+# opponent it is paired with in `picks` (rows with Abbr + game_id). Guards against another day's
+# final landing on a team that also plays today.
+scheduled_only <- function(results, picks) {
+  paired <- picks %>% group_by(game_id) %>% filter(n() == 2) %>% mutate(Opp = rev(Abbr)) %>% ungroup()
+  partner <- setNames(paired$Opp, paired$Abbr)
+  if (nrow(results) == 0) return(results)
+  results %>% filter(coalesce(partner[Team1] == Team2, TRUE), coalesce(partner[Team2] == Team1, TRUE))
+}
+
+# Fill in results still missing from a past day's file (a late tip that finished after the last
+# game-night run, or runs that didn't happen) from that date's scoreboard, and save it
+fill_missing_results <- function(date) {
+  f <- file.path(history_dir, paste0(date, ".csv"))
+  if (!file.exists(f)) return(invisible(FALSE))
+  day <- read_csv(f, show_col_types = FALSE, col_types = cols(Final_Score = col_character()))
+  if (!"Final_Score" %in% names(day)) day$Final_Score <- NA_character_
+  if (!any(is.na(day$Won_Game))) return(invisible(FALSE))
+  finals <- tryCatch(parse_scoreboard(scoreboard_lines(date)), error = function(e) data.frame())
+  if (nrow(finals) == 0) return(invisible(FALSE))
+  finals <- finals %>% filter(Finished, !is.na(Score1), !is.na(Score2)) %>% scheduled_only(day)
+  lookup <- bind_rows(
+    finals %>% transmute(Abbr = Team1, Won_New = Score1 > Score2, Score_New = paste0(Score1, "-", Score2)),
+    finals %>% transmute(Abbr = Team2, Won_New = Score2 > Score1, Score_New = paste0(Score2, "-", Score1))
+  )
+  filled <- day %>%
+    left_join(lookup, by = "Abbr") %>%
+    mutate(
+      fill = is.na(Won_Game) & !is.na(Won_New),
+      Won_Game = if_else(fill, Won_New, as.logical(Won_Game)),
+      Actual_Skins = if_else(fill, as.numeric((Pick == "W") == Won_New), as.numeric(Actual_Skins)),
+      Skins_Luck = if_else(fill, Actual_Skins - Expected_Skins, as.numeric(Skins_Luck)),
+      Final_Score = if_else(fill, Score_New, coalesce(Final_Score, ""))
+    )
+  if (!any(filled$fill)) return(invisible(FALSE))
+  write_csv(filled %>% select(all_of(names(day))), f)
+  invisible(TRUE)
+}
 ```
 
 ```{r timestamp}
@@ -948,6 +1004,8 @@ if (nrow(todays_picks) > 0) {
         Team2 = str_replace_all(Team2, team_replacements)
       )
   }
+  # Only results for the matchups we have scheduled today
+  all_game_results <- scheduled_only(all_game_results, todays_picks)
   
   # 6. Create Won_Game lookup - only for finished games
   final_team_results <- data.frame(Abbr = character(), Won_Game = logical(), stringsAsFactors = FALSE)
@@ -1301,6 +1359,8 @@ if (nrow(todays_picks) > 0) {
         Team2 = str_replace_all(Team2, team_replacements)
       )
   }
+  # Only results for the matchups we have scheduled today
+  matchup_game_results <- scheduled_only(matchup_game_results, todays_picks)
   
   # Create Won_Game lookup - only final games
   matchup_won_lookup <- data.frame(Abbr = character(), Won_Game = logical(), stringsAsFactors = FALSE)
@@ -1460,6 +1520,9 @@ if (nrow(todays_picks) > 0) {
 yesterday_ct <- today_ct - days(1)
 yesterday_file <- file.path(history_dir, paste0(yesterday_ct, ".csv"))
 
+# Before showing yesterday and the season totals, fill in any results the past week's files are missing
+for (i in 1:7) fill_missing_results(today_ct - days(i))
+
 if (file.exists(yesterday_file)) {
   yesterday_data <- read_csv(yesterday_file, show_col_types = FALSE)
   
@@ -1531,27 +1594,6 @@ if (file.exists(yesterday_file)) {
       # Safely add Final_Score column if it doesn't exist in the CSV
       if (!"Final_Score" %in% names(yesterday_data)) {
         yesterday_data <- yesterday_data %>% mutate(Final_Score = NA_character_)
-      }
-
-      # A late tip can finish after the last game-night run, leaving no result in yesterday's
-      # file - fill in any that are now final and save it, so the season totals count them
-      yesterday_won_lookup <- bind_rows(
-        finished_yesterday %>% transmute(Abbr = Team1, Won_New = Score1 > Score2),
-        finished_yesterday %>% transmute(Abbr = Team2, Won_New = Score2 > Score1)
-      )
-      yesterday_filled <- yesterday_data %>%
-        left_join(yesterday_won_lookup, by = "Abbr") %>%
-        left_join(yesterday_score_lookup, by = "Abbr") %>%
-        mutate(
-          fill = is.na(Won_Game) & !is.na(Won_New),
-          Won_Game = if_else(fill, Won_New, as.logical(Won_Game)),
-          Actual_Skins = if_else(fill, as.numeric((Pick == "W") == Won_New), as.numeric(Actual_Skins)),
-          Skins_Luck = if_else(fill, Actual_Skins - Expected_Skins, as.numeric(Skins_Luck)),
-          Final_Score = if_else(fill, Scraped_Score, coalesce(as.character(Final_Score), ""))
-        )
-      if (any(yesterday_filled$fill)) {
-        yesterday_data <- yesterday_filled %>% select(all_of(names(yesterday_data)))
-        write_csv(yesterday_data, yesterday_file)
       }
 
       yesterday_with_game <- yesterday_data %>%

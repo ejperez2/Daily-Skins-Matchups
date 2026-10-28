@@ -1,11 +1,11 @@
 name: Render and Publish Skins Page
 
 on:
-  # Central time: every 20 min 6:00 PM - 12:40 AM (game time), plus 6 AM, 9 AM, 12 PM, 3 PM
+  # Central time: every 20 min 6:00 PM - 1:40 AM (game time, up to the 2 AM skins-day cutoff), plus 6 AM, 9 AM, 12 PM, 3 PM
   schedule:
-    - cron: '*/20 23,0-5 * * *'         # CDT (UTC-5) game time
+    - cron: '*/20 23,0-6 * * *'         # CDT (UTC-5) game time
     - cron: '0 11,14,17,20 * * *'       # CDT (UTC-5) daytime
-    - cron: '*/20 0-6 * * *'            # CST (UTC-6) game time
+    - cron: '*/20 0-7 * * *'            # CST (UTC-6) game time
     - cron: '0 12,15,18,21 * * *'       # CST (UTC-6) daytime
 
   workflow_dispatch:
@@ -32,8 +32,8 @@ jobs:
           zone=$(TZ=America/Chicago date +%Z)
           if [ "$EVENT" = "schedule" ]; then
             case "$CRON" in
-              "*/20 23,0-5 * * *" | "0 11,14,17,20 * * *") [ "$zone" = "CDT" ] || run=false ;;
-              "*/20 0-6 * * *" | "0 12,15,18,21 * * *") [ "$zone" = "CST" ] || run=false ;;
+              "*/20 23,0-6 * * *" | "0 11,14,17,20 * * *") [ "$zone" = "CDT" ] || run=false ;;
+              "*/20 0-7 * * *" | "0 12,15,18,21 * * *") [ "$zone" = "CST" ] || run=false ;;
             esac
           fi
           echo "event=$EVENT cron='$CRON' chicago=$zone -> run=$run"
