@@ -322,21 +322,44 @@ if (!dir.exists(history_dir)) {
   dir.create(history_dir, recursive = TRUE)
 }
 
-# plaintextsports score boxes (the lines starting with "+") for one date.
-# Its undated /nba/ page doesn't roll over until ~5 AM ET, so early-morning runs would read last
-# night's finals as today's - always ask for the date. The dated URL for plaintextsports' own
-# "today" is just a redirect to /nba/, so then read /nba/ and check it really shows `date`.
+# plaintextsports score boxes (the lines starting with "+") for one date. Each date is fetched at
+# most once per run: every chunk that needs a day's scoreboard shares the same copy.
+scoreboard_cache <- new.env()
 scoreboard_lines <- function(date) {
+  key <- format(as_date(date))
+  if (is.null(scoreboard_cache[[key]])) scoreboard_cache[[key]] <- list(lines = fetch_scoreboard_lines(date))
+  scoreboard_cache[[key]]$lines
+}
+
+# The undated /nba/ page, fetched at most once per run
+live_scoreboard_page <- function() {
+  if (is.null(scoreboard_cache$live_page)) scoreboard_cache$live_page <- read_html("https://plaintextsports.com/nba/")
+  scoreboard_cache$live_page
+}
+
+# The undated /nba/ page doesn't roll over until ~5 AM ET, so early-morning runs would read last
+# night's finals as today's - only use it after checking it really shows `date`. The dated URL for
+# plaintextsports' own "today" is just a redirect to /nba/, so for today's skins date read /nba/
+# straight away; any other date, or a /nba/ page showing another day, goes to the dated URL.
+fetch_scoreboard_lines <- function(date) {
   box_lines <- function(page) {
     lines <- strsplit(page %>% html_element("body") %>% html_text2(), "\n")[[1]]
     lines[grepl("^\\+", lines)]
   }
+  # Day nav: "< Oct. 27" and "Oct. 29 >" links either side of the page's date
+  shows_date <- function(page) {
+    nav <- html_attr(html_elements(page, "a.nav"), "href")
+    all(paste0("/nba/", c(date - 1, date + 1), "/") %in% nav)
+  }
+  # Today's skins date (a skins day runs 2 AM - 2 AM Central)
+  if (date == as_date(now(tzone = "America/Chicago") - hours(2))) {
+    live <- tryCatch(live_scoreboard_page(), error = function(e) NULL)
+    if (!is.null(live) && shows_date(live)) return(box_lines(live))
+  }
   page <- read_html(paste0("https://plaintextsports.com/nba/", date, "/"))
   if (length(box_lines(page)) == 0 && !is.na(html_element(page, "#redirect"))) {
-    page <- read_html("https://plaintextsports.com/nba/")
-    # Day nav: "< Oct. 27" and "Oct. 29 >" links either side of the page's date
-    nav <- html_attr(html_elements(page, "a.nav"), "href")
-    if (!all(paste0("/nba/", c(date - 1, date + 1), "/") %in% nav)) return(character())
+    page <- live_scoreboard_page()
+    if (!shows_date(page)) return(character())
   }
   box_lines(page)
 }
