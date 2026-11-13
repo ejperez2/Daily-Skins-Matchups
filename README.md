@@ -21,6 +21,11 @@
   update is due (e.g. "17 min ago · next update ~8:23 PM"). An open tab checks GitHub Pages once a minute
   and reloads itself when a newer page has been published; that check never touches the scraped sites.
   The update times are repeated in the script at the top of `skins_today.qmd` (`isRun`) - change both together.
+- **Settled days are skipped:** once every game of the skins day is final, saved in `skins_history` and
+  shown on the published page, later runs that day stop at the workflow's `gate` job and scrape nothing
+  (`.github/scripts/day_settled.py` decides; it needs ESPN, the history file and the published page to all
+  agree, and runs as usual whenever it can't tell). The page then says "all games final" instead of a next
+  update time. To rebuild anyway, use "Run workflow" on GitHub with **force** ticked.
 - **Scoreboard fetches:** each plaintextsports page is read at most once per run (`scoreboard_lines` keeps
   a per-run copy), so a normal run makes 2 requests there: today's scoreboard and yesterday's.
 

@@ -225,7 +225,10 @@ format:
             var now = Date.now(), mins = Math.max(0, Math.floor((now - built) / MIN));
             var age = mins < 1 ? "Just now" : mins < 60 ? mins + " min ago" : Math.floor(mins / 60) + " hr " + (mins % 60) + " min ago";
             var next = "";
-            if (now <= firstDue) next = "next update ~" + clock.format(new Date(firstDue));
+            // Once every game today is final there is nothing left to update, and runs are skipped
+            var cards = document.querySelectorAll("#sk-today-games .sk-card");
+            if (cards.length && !document.querySelector("#sk-today-games .sk-card:not([data-state='final'])")) next = "all games final";
+            else if (now <= firstDue) next = "next update ~" + clock.format(new Date(firstDue));
             else if (now <= firstDue + GRACE) next = "next update any minute";
             else { var later = nextRun(now - LAG) + LAG; if (isFinite(later)) next = "next update ~" + clock.format(new Date(later)); }  // that run was missed
             out.textContent = age + (next ? " \u00b7 " + next : "");

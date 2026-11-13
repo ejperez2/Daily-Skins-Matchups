@@ -9,6 +9,11 @@ on:
     - cron: '0 12,15,18,21 * * *'       # CST (UTC-6) daytime
 
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Run even if all of today's games are already final and published"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -21,7 +26,7 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     outputs:
-      run: ${{ steps.check.outputs.run }}
+      run: ${{ steps.check.outputs.run == 'true' && steps.settled.outputs.settled != 'true' }}
     steps:
       - id: check
         env:
@@ -38,6 +43,24 @@ jobs:
           fi
           echo "event=$EVENT cron='$CRON' chicago=$zone -> run=$run"
           echo "run=$run" >> "$GITHUB_OUTPUT"
+
+      # Once every game of the skins day is final, saved and published, a run has nothing left to
+      # update, so skip it - and with it every request to the sites the scores and odds come from.
+      # The script only says "settled" when ESPN, the history file and the published page all agree;
+      # if it can't tell (or these steps fail), the run goes ahead as usual. "Run workflow" with
+      # "force" ticked always runs.
+      - name: Check out repository
+        if: steps.check.outputs.run == 'true' && inputs.force != true
+        continue-on-error: true
+        uses: actions/checkout@v4
+
+      - id: settled
+        if: steps.check.outputs.run == 'true' && inputs.force != true
+        continue-on-error: true
+        run: |
+          if timeout 90 python3 .github/scripts/day_settled.py; then
+            echo "settled=true" >> "$GITHUB_OUTPUT"
+          fi
 
   build-and-deploy:
     needs: gate
