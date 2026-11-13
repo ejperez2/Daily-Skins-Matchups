@@ -1,13 +1,9 @@
 name: Render and Publish Skins Page
 
 on:
-  # Central time: every 20 min 6:00 PM - 1:40 AM (game time, up to the 2 AM skins-day cutoff), plus 6 AM, 9 AM, 12 PM, 3 PM
-  schedule:
-    - cron: '*/20 23,0-6 * * *'         # CDT (UTC-5) game time
-    - cron: '0 11,14,17,20 * * *'       # CDT (UTC-5) daytime
-    - cron: '*/20 0-7 * * *'            # CST (UTC-6) game time
-    - cron: '0 12,15,18,21 * * *'       # CST (UTC-6) daytime
-
+  # Runs are started on the update schedule (every 20 min 6:00 PM - 12:40 AM Central, plus 6 AM, 9 AM,
+  # 12 PM, 3 PM) by the external scheduler through workflow_dispatch, and by the "Refresh now" button.
+  # GitHub's own cron is not used: it fires late and duplicates those runs.
   workflow_dispatch:
     inputs:
       force:
@@ -21,41 +17,23 @@ permissions:
   id-token: write
 
 jobs:
-  # GitHub schedules run on UTC; Chicago is UTC-5 (CDT) or UTC-6 (CST). Each Central time has a CDT
-  # and a CST cron line above - this job lets through only the one that matches today's clock.
   gate:
     runs-on: ubuntu-latest
     outputs:
-      run: ${{ steps.check.outputs.run == 'true' && steps.settled.outputs.settled != 'true' }}
+      run: ${{ steps.settled.outputs.settled != 'true' }}
     steps:
-      - id: check
-        env:
-          EVENT: ${{ github.event_name }}
-          CRON: ${{ github.event.schedule }}
-        run: |
-          run=true
-          zone=$(TZ=America/Chicago date +%Z)
-          if [ "$EVENT" = "schedule" ]; then
-            case "$CRON" in
-              "*/20 23,0-6 * * *" | "0 11,14,17,20 * * *") [ "$zone" = "CDT" ] || run=false ;;
-              "*/20 0-7 * * *" | "0 12,15,18,21 * * *") [ "$zone" = "CST" ] || run=false ;;
-            esac
-          fi
-          echo "event=$EVENT cron='$CRON' chicago=$zone -> run=$run"
-          echo "run=$run" >> "$GITHUB_OUTPUT"
-
       # Once every game of the skins day is final, saved and published, a run has nothing left to
       # update, so skip it - and with it every request to the sites the scores and odds come from.
       # The script only says "settled" when ESPN, the history file and the published page all agree;
       # if it can't tell (or these steps fail), the run goes ahead as usual. "Run workflow" with
       # "force" ticked always runs.
       - name: Check out repository
-        if: steps.check.outputs.run == 'true' && inputs.force != true
+        if: inputs.force != true
         continue-on-error: true
         uses: actions/checkout@v4
 
       - id: settled
-        if: steps.check.outputs.run == 'true' && inputs.force != true
+        if: inputs.force != true
         continue-on-error: true
         run: |
           if timeout 90 python3 .github/scripts/day_settled.py; then
@@ -76,33 +54,16 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # GitHub's own schedule sometimes fires a few minutes after an update that was started another
-      # way. This step runs once the job has its turn (the concurrency group above), so an update still
-      # publishing has finished by now. If the page was built under 10 minutes ago, every step below is
-      # skipped and nothing is scraped. Manual runs ("Refresh now", "Run workflow") are never skipped;
-      # if the check fails for any reason the run goes ahead.
-      - name: Skip a scheduled run if the page was just rebuilt
-        id: fresh
-        if: github.event_name == 'schedule'
-        continue-on-error: true
-        run: |
-          if timeout 60 python3 .github/scripts/page_fresh.py; then
-            echo "fresh=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Set up R
-        if: steps.fresh.outputs.fresh != 'true'
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: '4.5'
           use-public-rspm: true 
 
       - name: Set up Quarto
-        if: steps.fresh.outputs.fresh != 'true'
         uses: quarto-dev/quarto-actions/setup@v2
 
       - name: Install R Dependencies
-        if: steps.fresh.outputs.fresh != 'true'
         uses: r-lib/actions/setup-r-dependencies@v2
         with:
           extra-packages: |
@@ -120,15 +81,12 @@ jobs:
             any::pacman
 
       - name: Create history directory
-        if: steps.fresh.outputs.fresh != 'true'
         run: mkdir -p skins_history
 
       - name: Render Quarto Document
-        if: steps.fresh.outputs.fresh != 'true'
         run: quarto render skins_today.qmd --to html --output-dir _site --output index.html
 
       - name: Add past seasons
-        if: steps.fresh.outputs.fresh != 'true'
         run: |
           # Past seasons: publish each archive/<season>/index.html at /<season>/
           for d in archive/*/; do
@@ -138,7 +96,6 @@ jobs:
           done
 
       - name: Commit history updates
-        if: steps.fresh.outputs.fresh != 'true'
         continue-on-error: true
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
@@ -148,12 +105,10 @@ jobs:
           git push
 
       - name: Upload artifact
-        if: steps.fresh.outputs.fresh != 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: './_site'
 
       - name: Deploy to GitHub Pages
-        if: steps.fresh.outputs.fresh != 'true'
         id: deployment
         uses: actions/deploy-pages@v4

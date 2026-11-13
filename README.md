@@ -15,7 +15,9 @@
   so a perfect day means 10 skins in one day.
 
 - **Update schedule (Central):** every 20 minutes 6:00 PM - 12:40 AM, plus 6 AM, 9 AM, 12 PM and 3 PM.
-  The workflow has CDT and CST cron lines; a `gate` job runs only the one matching Chicago's current offset.
+  Runs are started by an external scheduler (the Cloudflare Worker, via `workflow_dispatch`) and by the
+  "Refresh now" button. The workflow has no GitHub `schedule:` of its own: GitHub's cron fires late and
+  duplicated those runs. If updates ever stop, check the external scheduler first.
 - **Navigation:** both pages (and the 2025-26 archives) link to each other at the top.
 - **Page age and auto-refresh:** under "Last updated" the page shows how old it is and when the next
   update is due (e.g. "17 min ago · next update ~8:23 PM"). An open tab checks GitHub Pages once a minute
@@ -26,10 +28,6 @@
   (`.github/scripts/day_settled.py` decides; it needs ESPN, the history file and the published page to all
   agree, and runs as usual whenever it can't tell). The page then says "all games final" instead of a next
   update time. To rebuild anyway, use "Run workflow" on GitHub with **force** ticked.
-- **Duplicate scheduled runs are skipped:** GitHub's own schedule sometimes fires a few minutes after an
-  update that was started another way. A scheduled run now checks (`.github/scripts/page_fresh.py`) whether the
-  published page was built under 10 minutes ago and, if so, skips every build step and scrapes nothing.
-  Manual runs ("Refresh now", "Run workflow") are never skipped, and if the check fails the run goes ahead.
 - **Scoreboard fetches:** each plaintextsports page is read at most once per run (`scoreboard_lines` keeps
   a per-run copy), so a normal run makes 2 requests there: today's scoreboard and yesterday's.
 
