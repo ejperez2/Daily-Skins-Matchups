@@ -15,6 +15,7 @@ format:
         .sk-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 15px; margin: 0 0 6px 0; padding: 6px 0; border-bottom: 1px solid rgba(128,128,128,0.35); }
         .sk-btn { font-size: 13px; padding: 2px 10px; cursor: pointer; color: inherit; background: transparent; border: 1px solid rgba(128,128,128,0.6); border-radius: 4px; }
         .sk-meta { font-size: 14px; color: #999; margin: 0; }
+        .sk-age { display: block; }
         .sk-who { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; color: var(--sk-muted); margin: 12px 0; }
         .sk-seg { display: inline-flex; border: 1px solid var(--sk-line); border-radius: 8px; overflow: hidden; }
         .sk-seg button { font: inherit; font-size: 14px; color: inherit; background: transparent; border: 0; padding: 5px 12px; cursor: pointer; }
@@ -193,11 +194,80 @@ format:
             apply();
           });
           apply();
+        })();
+        // Under "Last updated": how old this page is and when the next one is due. Also reloads the
+        // page as soon as a newer one is published. The check only asks GitHub Pages whether this
+        // page has changed; it never touches the sites the scores and odds come from.
+        (function () {
+          var meta = document.getElementById("sk-updated"), out = document.getElementById("sk-age");
+          var built = meta ? Number(meta.getAttribute("data-built")) * 1000 : NaN;
+          if (!out || !isFinite(built) || built <= 0) return;
+          var MIN = 60000;
+          var LAG = 3 * MIN;    // a run takes 2-3 minutes from its start to the published page
+          var GRACE = 5 * MIN;  // how long a late run is still shown as "any minute"
 
-          // While a game is live, reload every 5 minutes so the scoreboard stays current.
-          if (document.querySelector("#sk-today-games .sk-card[data-state='live']")) {
-            setInterval(function () { if (document.visibilityState === "visible") location.reload(); }, 5 * 60 * 1000);
+          // Update times (Central), same as the README: every 20 min 6:00 PM - 12:40 AM, plus 6 AM, 9 AM, 12 PM, 3 PM
+          var hm = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+          var clock = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit" });
+          function isRun(t) {
+            var h = 0, m = 0;
+            hm.formatToParts(new Date(t)).forEach(function (p) { if (p.type === "hour") h = Number(p.value) % 24; if (p.type === "minute") m = Number(p.value); });
+            return (m % 20 === 0 && (h >= 18 || h === 0)) || (m === 0 && (h === 6 || h === 9 || h === 12 || h === 15));
           }
+          function nextRun(after) {
+            var t = Math.floor(after / MIN) * MIN;
+            for (var i = 0; i < 1440; i++) { t += MIN; if (isRun(t)) return t; }
+            return NaN;
+          }
+          var firstDue = nextRun(built) + LAG;  // the run after the one that made this page
+
+          function render() {
+            var now = Date.now(), mins = Math.max(0, Math.floor((now - built) / MIN));
+            var age = mins < 1 ? "Just now" : mins < 60 ? mins + " min ago" : Math.floor(mins / 60) + " hr " + (mins % 60) + " min ago";
+            var next = "";
+            if (now <= firstDue) next = "next update ~" + clock.format(new Date(firstDue));
+            else if (now <= firstDue + GRACE) next = "next update any minute";
+            else { var later = nextRun(now - LAG) + LAG; if (isFinite(later)) next = "next update ~" + clock.format(new Date(later)); }  // that run was missed
+            out.textContent = age + (next ? " \u00b7 " + next : "");
+          }
+          try { render(); setInterval(render, 30000); } catch (e) { out.textContent = ""; }
+
+          // Newer page published? Compare the Last-Modified GitHub Pages reports now with this copy's own.
+          // document.lastModified is "MM/DD/YYYY hh:mm:ss" in the viewer's own time zone
+          var lm = /^(\d+)\/(\d+)\/(\d+)\s+(\d+):(\d+):(\d+)$/.exec(document.lastModified || "");
+          var mine = lm ? new Date(+lm[3], lm[1] - 1, +lm[2], +lm[4], +lm[5], +lm[6]).getTime() : NaN;
+          // A page is published a minute or so after `built`; anything else means this browser reports
+          // the time oddly (e.g. a disguised time zone), so don't trust the comparison
+          if (!(mine >= built - 2 * MIN && mine <= built + 20 * MIN)) mine = NaN;
+          var canCompare = true, busy = false;
+          function check() {
+            if (busy || !window.fetch || document.visibilityState !== "visible") return;
+            busy = true;
+            fetch(location.href.split("#")[0], { method: "HEAD", cache: "no-store" })
+              .then(function (r) {
+                if (!r.ok) return;
+                var theirs = Date.parse(r.headers.get("Last-Modified") || "");
+                canCompare = isFinite(theirs) && isFinite(mine);
+                if (!canCompare || theirs <= mine + 1000) return;
+                // At most 3 reloads for the same version, so a slow-to-update copy can never loop
+                var seen = ["", "0"];
+                try { seen = (sessionStorage.getItem("skinsReloaded") || "|0").split("|"); } catch (e) { return; }
+                var tries = seen[0] === String(theirs) ? Number(seen[1]) || 0 : 0;
+                if (tries >= 3) return;
+                try { sessionStorage.setItem("skinsReloaded", theirs + "|" + (tries + 1)); } catch (e) { return; }
+                location.reload();
+              })
+              .catch(function () {})
+              .then(function () { busy = false; });
+          }
+          check();
+          setInterval(check, MIN);
+          document.addEventListener("visibilitychange", check);
+          // If the host ever stops reporting Last-Modified, fall back to a plain reload every 5 minutes
+          // until today's games are all final.
+          setInterval(function () {
+            if (!canCompare && document.visibilityState === "visible" && document.querySelector("#sk-today-games .sk-card:not([data-state='final'])")) location.reload();
+          }, 5 * MIN);
         })();
         // Season charts: hover or tap for each day's values (same style as the Standings page)
         (function () {
@@ -424,8 +494,11 @@ fill_missing_results <- function(date) {
 ```{r timestamp}
 #| echo: false
 #| results: 'asis'
-ts <- format(Sys.time(), "%A, %B %d, %Y at %I:%M %p %Z", tz = "America/Chicago")
-cat(paste0("<p class='sk-meta'><strong>Last updated:</strong> ", ts, "</p>"))
+built <- Sys.time()
+ts <- format(built, "%A, %B %d, %Y at %I:%M %p %Z", tz = "America/Chicago")
+# data-built (epoch seconds) feeds the "N min ago / next update" line and the new-version check
+cat(paste0("<p class='sk-meta' id='sk-updated' data-built='", sprintf("%.0f", as.numeric(built)), "'><strong>Last updated:</strong> ", ts,
+           "<span class='sk-age' id='sk-age'></span></p>"))
 ```
 
 

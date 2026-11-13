@@ -17,6 +17,12 @@
 - **Update schedule (Central):** every 20 minutes 6:00 PM - 12:40 AM, plus 6 AM, 9 AM, 12 PM and 3 PM.
   The workflow has CDT and CST cron lines; a `gate` job runs only the one matching Chicago's current offset.
 - **Navigation:** both pages (and the 2025-26 archives) link to each other at the top.
+- **Page age and auto-refresh:** under "Last updated" the page shows how old it is and when the next
+  update is due (e.g. "17 min ago · next update ~8:23 PM"). An open tab checks GitHub Pages once a minute
+  and reloads itself when a newer page has been published; that check never touches the scraped sites.
+  The update times are repeated in the script at the top of `skins_today.qmd` (`isRun`) - change both together.
+- **Scoreboard fetches:** each plaintextsports page is read at most once per run (`scoreboard_lines` keeps
+  a per-run copy), so a normal run makes 2 requests there: today's scoreboard and yesterday's.
 
 Sections below describe the 2025-26 (6-player) setup unless noted.
 
