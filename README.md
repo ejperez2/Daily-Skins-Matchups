@@ -26,6 +26,10 @@
   (`.github/scripts/day_settled.py` decides; it needs ESPN, the history file and the published page to all
   agree, and runs as usual whenever it can't tell). The page then says "all games final" instead of a next
   update time. To rebuild anyway, use "Run workflow" on GitHub with **force** ticked.
+- **Duplicate scheduled runs are skipped:** GitHub's own schedule sometimes fires a few minutes after an
+  update that was started another way. A scheduled run now checks (`.github/scripts/page_fresh.py`) whether the
+  published page was built under 10 minutes ago and, if so, skips every build step and scrapes nothing.
+  Manual runs ("Refresh now", "Run workflow") are never skipped, and if the check fails the run goes ahead.
 - **Scoreboard fetches:** each plaintextsports page is read at most once per run (`scoreboard_lines` keeps
   a per-run copy), so a normal run makes 2 requests there: today's scoreboard and yesterday's.
 
