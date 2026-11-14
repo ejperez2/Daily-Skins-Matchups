@@ -20,7 +20,7 @@
   duplicated those runs. If updates ever stop, check the external scheduler first.
 - **Navigation:** both pages (and the 2025-26 archives) link to each other at the top.
 - **Page age and auto-refresh:** under "Last updated" the page shows how old it is and when the next
-  update is due (e.g. "17 min ago · next update ~8:23 PM"). An open tab checks GitHub Pages once a minute
+  update is due (e.g. "Updated 8:01 PM · 17 min ago · next ~8:23 PM"). An open tab checks GitHub Pages once a minute
   and reloads itself when a newer page has been published; that check never touches the scraped sites.
   The update times are repeated in the script at the top of `skins_today.qmd` (`isRun`) - change both together.
 - **Settled days are skipped:** once every game of the skins day is final, saved in `skins_history` and

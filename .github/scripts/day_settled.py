@@ -106,7 +106,7 @@ def check_page(day, finals, now):
     if built_day != day:
         raise NotSettled("published page is from " + str(built_day))
     start = re.search(r"""id=["']sk-today-games["']""", html)
-    end = re.search(r"""id=["']fold-odds["']""", html)
+    end = re.search(r"""id=["']fold-(?:odds|yesterday)["']""", html)  # whichever section follows the games
     if not start or not end or end.start() < start.end():
         raise NotSettled("published page has no games section")
     games = html[start.end():end.start()]
