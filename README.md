@@ -28,6 +28,11 @@
   (`.github/scripts/day_settled.py` decides; it needs ESPN, the history file and the published page to all
   agree, and runs as usual whenever it can't tell). The page then says "all games final" instead of a next
   update time. To rebuild anyway, use "Run workflow" on GitHub with **force** ticked.
+- **Daily luck graphs:** once the first game has tipped off, every run adds one point per player to
+  `luck_history/<skins date>.csv` (Time in UTC, Player, Luck - the same number as the Luck column of
+  "Today by player"). "Today's luck" (under the Today by player table) and "Yesterday's luck" (top of the
+  Yesterday section) draw those points, starting at zero at the first tip-off. Days before this was added
+  have no file, so they show no graph.
 - **Scoreboard fetches:** each plaintextsports page is read at most once per run (`scoreboard_lines` keeps
   a per-run copy), so a normal run makes 2 requests there: today's scoreboard and yesterday's.
 

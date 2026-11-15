@@ -110,6 +110,8 @@ format:
         .sk-tip div { display: flex; align-items: center; gap: 6px; }
         .sk-tip b { margin-left: auto; padding-left: 10px; }
         .sk-tip[hidden] { display: none; }
+        .sk-daychart { margin-top: 14px; }
+        .sk-daychart[hidden] { display: none; }
         .sk-empty { padding: 36px 8px; text-align: center; color: var(--sk-muted); font-size: 14px; }
         @media (max-width: 768px) { table { font-size: 12px; } th, td { padding: 4px !important; } .sk-table th, .sk-table td { padding: 7px 6px !important; } table.sk-table { font-size: 14px; } #sk-today-summary th, #sk-today-summary td { padding: 7px 4px !important; } }
         </style>
@@ -274,6 +276,96 @@ format:
           setInterval(function () {
             if (!canCompare && document.visibilityState === "visible" && document.querySelector("#sk-today-games .sk-card:not([data-state='final'])")) location.reload();
           }, 5 * MIN);
+        })();
+        // Daily luck graphs (today and yesterday): one point per update, hover or tap for the values
+        (function () {
+          var boxes = Array.prototype.slice.call(document.querySelectorAll(".sk-daychart"));
+          if (!boxes.length) return;
+          function esc(x) { return String(x).replace(/[&<>"]/g, function (ch) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]; }); }
+          var hourFmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric" });
+          var timeFmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit" });
+          var fmt = function (v) { return (v > 0.05 ? "+" : "") + (Math.abs(v) < 0.05 ? "0.0" : v.toFixed(1)); };
+          var fmt2 = function (v) { return (v > 0.005 ? "+" : "") + (Math.abs(v) < 0.005 ? "0.00" : v.toFixed(2)); };
+          function ticks(a, b) {
+            if (b - a < 0.2) { a -= 0.1; b += 0.1; }
+            var step0 = (b - a) / 4, mag = Math.pow(10, Math.floor(Math.log10(step0)));
+            var step = [1, 2, 5, 10].map(function (m) { return m * mag; }).filter(function (s) { return s >= step0; })[0];
+            var t = []; for (var v = Math.floor(a / step) * step; v <= b + step * 1e-6; v += step) t.push(+v.toFixed(6));
+            if (t[t.length - 1] < b) t.push(+(t[t.length - 1] + step).toFixed(6));
+            return t;
+          }
+          function draw(box) {
+            var plot = box.querySelector(".sk-plot");
+            if (!plot.clientWidth) return;  // inside a closed section; drawn when opened
+            var D = JSON.parse(box.querySelector("script").textContent), P = D.players, C = D.colors, pts = D.pts, n = pts.length;
+            var me = ""; try { me = localStorage.getItem("skinsMe") || ""; } catch (e) {}
+            var dot = function (p) { return '<span class="sk-dot" style="--c:' + C[p] + '"></span>'; };
+            box.querySelector(".sk-cleg").innerHTML = P.map(function (p) { return "<span>" + dot(p) + esc(p) + "</span>"; }).join("");
+            var series = P.map(function (p) { return { p: p, v: pts.map(function (q) { var x = q.r[p]; return x == null ? null : x; }) }; });
+            var vals = [0]; series.forEach(function (s) { s.v.forEach(function (v) { if (v != null) vals.push(v); }); });
+            var W = Math.max(280, plot.clientWidth), H = Math.round(Math.min(260, Math.max(180, W * 0.5)));
+            var m = { l: 40, r: 78, t: 10, b: 24 };
+            var yt = ticks(Math.min.apply(null, vals), Math.max.apply(null, vals)), y0 = yt[0], y1 = yt[yt.length - 1];
+            var t0 = pts[0].t, t1 = pts[n - 1].t;
+            var xs = function (t) { return m.l + (t1 === t0 ? 0.5 : (t - t0) / (t1 - t0)) * (W - m.l - m.r); };
+            var ys = function (v) { return m.t + (1 - (v - y0) / ((y1 - y0) || 1)) * (H - m.t - m.b); };
+            var svg = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(box.querySelector(".sk-cttl").textContent) + ' chart">';
+            yt.forEach(function (v) {
+              svg += '<line x1="' + m.l + '" x2="' + (W - m.r) + '" y1="' + ys(v) + '" y2="' + ys(v) + '" stroke="' + (v === 0 ? "#888" : "#3a3a3a") + '" stroke-width="1"/>' +
+                '<text x="' + (m.l - 6) + '" y="' + (ys(v) + 4) + '" text-anchor="end">' + fmt(v) + "</text>";
+            });
+            // Hour marks (Central); at most ~5 labels, fewer on a narrow screen
+            var HR = 3600000, first = Math.ceil(t0 / HR) * HR, hours = Math.floor((t1 - first) / HR) + 1;
+            var every = Math.max(1, Math.ceil(hours / (W < 500 ? 4 : 6)));
+            for (var h = first, k = 0; h <= t1; h += HR, k++) {
+              if (k % every) continue;
+              svg += '<line x1="' + xs(h) + '" x2="' + xs(h) + '" y1="' + (H - m.b) + '" y2="' + (H - m.b + 4) + '" stroke="#666" stroke-width="1"/>' +
+                '<text x="' + xs(h) + '" y="' + (H - 6) + '" text-anchor="middle">' + hourFmt.format(new Date(h)) + "</text>";
+            }
+            var line = function (arr) {
+              var d = "", on = false;
+              arr.forEach(function (v, i) { if (v == null) { on = false; return; } d += (on ? "L" : "M") + xs(pts[i].t).toFixed(1) + " " + ys(v).toFixed(1); on = true; });
+              return d;
+            };
+            series.forEach(function (s) {
+              svg += '<path d="' + line(s.v) + '" fill="none" stroke="' + C[s.p] + '" stroke-width="' + (s.p === me ? 3 : 2) + '" stroke-linejoin="round" stroke-linecap="round"/>';
+            });
+            var ends = [];
+            series.forEach(function (s) { var last = -1; s.v.forEach(function (v, i) { if (v != null) last = i; }); if (last >= 0) ends.push({ s: s, i: last, y: ys(s.v[last]) }); });
+            ends.sort(function (a, b) { return a.y - b.y; });
+            for (var j = 1; j < ends.length; j++) if (ends[j].y - ends[j - 1].y < 15) ends[j].y = ends[j - 1].y + 15;
+            var over = ends.length ? ends[ends.length - 1].y - (H - m.b) : 0;  // keep stacked labels above the axis
+            ends.forEach(function (e) {
+              if (over > 0) e.y -= over;
+              svg += '<circle cx="' + xs(pts[e.i].t) + '" cy="' + ys(e.s.v[e.i]) + '" r="4" fill="' + C[e.s.p] + '" stroke="#2b2b2b" stroke-width="2"/>' +
+                '<text class="sk-end" x="' + (xs(pts[e.i].t) + 8) + '" y="' + (e.y + 4) + '">' + esc(e.s.p.slice(0, 3)) + " " + fmt(e.s.v[e.i]) + "</text>";
+            });
+            svg += '<line class="sk-xh" y1="' + m.t + '" y2="' + (H - m.b) + '" stroke="#888" stroke-width="1" visibility="hidden"/>' +
+              '<rect class="sk-hit" x="' + m.l + '" y="0" width="' + (W - m.l - m.r) + '" height="' + H + '" fill="transparent"/></svg>';
+            plot.innerHTML = svg + '<div class="sk-tip" hidden></div>';
+
+            var hit = plot.querySelector(".sk-hit"), xh = plot.querySelector(".sk-xh"), tip = plot.querySelector(".sk-tip");
+            var show = function (e) {
+              var x = e.clientX - plot.getBoundingClientRect().left, best = 0;
+              for (var i = 1; i < n; i++) if (Math.abs(xs(pts[i].t) - x) < Math.abs(xs(pts[best].t) - x)) best = i;
+              var bx = xs(pts[best].t);
+              var rows = series.map(function (s) { return { p: s.p, v: s.v[best] }; }).filter(function (r) { return r.v != null; }).sort(function (a, b) { return b.v - a.v; });
+              xh.setAttribute("x1", bx); xh.setAttribute("x2", bx); xh.setAttribute("visibility", "visible");
+              tip.innerHTML = '<div style="color:var(--sk-muted)">' + timeFmt.format(new Date(pts[best].t)) + "</div>" +
+                rows.map(function (r) { return "<div>" + dot(r.p) + esc(r.p) + "<b>" + fmt2(r.v) + "</b></div>"; }).join("");
+              tip.hidden = false;
+              var tw = tip.offsetWidth;
+              tip.style.left = Math.max(0, Math.min(W - tw, bx + (bx > W / 2 ? -tw - 10 : 10))) + "px";
+            };
+            hit.addEventListener("pointermove", show);
+            hit.addEventListener("pointerdown", show);
+            hit.addEventListener("pointerleave", function () { tip.hidden = true; xh.setAttribute("visibility", "hidden"); });
+          }
+          function drawAll() { boxes.forEach(function (b) { try { draw(b); } catch (e) { b.hidden = true; } }); }
+          Array.prototype.forEach.call(document.querySelectorAll("details.sk-fold"), function (d) { d.addEventListener("toggle", drawAll); });
+          var seg = document.getElementById("sk-me"); if (seg) seg.addEventListener("click", function () { setTimeout(drawAll, 0); });
+          var rz; window.addEventListener("resize", function () { clearTimeout(rz); rz = setTimeout(drawAll, 120); });
+          drawAll();
         })();
         // Season charts: hover or tap for each day's values (same style as the Standings page)
         (function () {
@@ -1345,6 +1437,40 @@ build_table <- function(rows, cols, table_id, data_attrs = FALSE) {
 }
 
 cat_html <- function(x) cat("\n```{=html}\n", x, "\n```\n", sep = "")
+
+# --- Daily luck graph ---
+# Every run made while a game is under way (or has finished) adds one point per player to
+# luck_history/<skins date>.csv: Time (UTC), Player, Luck (live expected skins minus pregame expected
+# skins - the same number as the Luck column of "Today by player"). The line starts at zero at the
+# first tip-off and ends with the run that sees the last final.
+luck_dir <- "luck_history"
+player_colors <- c(Eristeo = "#3E97D6", Brian = "#E26A54", Adam = "#22A794")
+luck_time <- function(t) format(t, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+read_luck <- function(date) {
+  f <- file.path(luck_dir, paste0(date, ".csv"))
+  if (!file.exists(f)) return(NULL)
+  tryCatch({
+    d <- read_csv(f, show_col_types = FALSE, col_types = cols(Time = col_character(), Player = col_character(), Luck = col_double()))
+    d <- d %>% filter(!is.na(Time), !is.na(Luck), Player %in% PLAYERS)
+    if (nrow(d) == 0) NULL else d
+  }, error = function(e) NULL)
+}
+# Chart block for one day's points (drawn in the browser); "" until there are two points to join
+luck_chart_html <- function(pts, title, desc) {
+  if (is.null(pts) || n_distinct(pts$Time) < 2) return("")
+  pts <- pts %>% mutate(ms = as.numeric(as.POSIXct(Time, format = "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")) * 1000) %>%
+    filter(!is.na(ms)) %>% distinct(ms, Player, .keep_all = TRUE) %>% arrange(ms)
+  who <- PLAYERS[PLAYERS %in% pts$Player]
+  json <- vapply(split(pts, pts$ms), function(g) {
+    paste0('{"t":', sprintf("%.0f", g$ms[1]), ',"r":{', paste(sprintf('"%s":%.3f', g$Player, g$Luck), collapse = ","), "}}")
+  }, character(1))
+  paste0(
+    "<div class='sk-daychart'><div class='sk-cttl'>", html_esc(title), "</div><p class='sk-cdsc'>", html_esc(desc), "</p>",
+    "<div class='sk-cleg'></div><div class='sk-plot'></div>",
+    "<script type='application/json'>{\"players\":[", paste0('"', who, '"', collapse = ","), "],\"colors\":{",
+    paste0('"', names(player_colors), '":"', player_colors, '"', collapse = ","), "},\"pts\":[", paste(json, collapse = ","), "]}</script></div>"
+  )
+}
 ```
 
 ```{r me_picker}
@@ -1379,6 +1505,26 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
     mutate(Luck = Live - Expected) %>%
     arrange(desc(Luck))
 
+  # Daily luck graph: add this run's point once the first game has tipped off. A failure here must
+  # never stop the page, so the whole step is wrapped.
+  today_luck <- tryCatch({
+    board <- scheduled_only(parse_scoreboard(scoreboard_lines(today_ct)), todays_picks)
+    started <- nrow(board) > 0 && any(board$Finished | !str_detect(board$Status, "\\d{1,2}:\\d{2}\\s*[AP]M\\s+ET"))
+    if (started) {
+      dir.create(luck_dir, showWarnings = FALSE, recursive = TRUE)
+      saved <- read_luck(today_ct)
+      if (is.null(saved)) {
+        # Start the line at zero at the first tip-off (or one update ago when the tip time isn't known)
+        tip <- suppressWarnings(min(todays_results$game_time_ct, na.rm = TRUE))
+        if (!is.finite(as.numeric(tip)) || tip >= Sys.time()) tip <- Sys.time() - 20 * 60
+        saved <- tibble(Time = luck_time(tip), Player = day_summary$Player, Luck = 0)
+      }
+      bind_rows(saved, tibble(Time = luck_time(Sys.time()), Player = day_summary$Player, Luck = round(day_summary$Luck, 3))) %>%
+        write_csv(file.path(luck_dir, paste0(today_ct, ".csv")))
+    }
+    read_luck(today_ct)
+  }, error = function(e) NULL)
+
   cat_html(paste0(
     "<details class='sk-fold' id='fold-today' open><summary>Today by player</summary><div class='sk-inner'>",
     build_table(day_summary, list(
@@ -1390,6 +1536,7 @@ if (exists("todays_results") && nrow(todays_results) > 0) {
       Luck = function(r) luck_pill(r$Luck)
     ), "sk-today-summary", data_attrs = TRUE),
     "<p class='sk-note'>Live % = live expected skins per game. Luck = live expected skins minus pregame expected skins.</p>",
+    luck_chart_html(today_luck, "Today's luck", "Each player's luck at every update since the first tip-off."),
     "</div></details>"
   ))
 }
@@ -1716,8 +1863,25 @@ if (file.exists(yesterday_file)) {
           ) %>%
           arrange(desc(Luck))
 
+        # Yesterday's luck line; if the last game ended after the final update of the night, close the
+        # line with the final numbers
+        yesterday_luck <- tryCatch({
+          pts <- read_luck(yesterday_ct)
+          if (!is.null(pts)) {
+            last <- pts %>% filter(Time == max(Time))
+            final <- yesterday_summary %>% transmute(Player, Luck = round(Luck, 3))
+            both <- full_join(last %>% select(Player, Was = Luck), final, by = "Player")
+            if (any(is.na(both$Was) | is.na(both$Luck) | abs(both$Was - both$Luck) > 0.005)) {
+              end <- as.POSIXct(max(pts$Time), format = "%Y-%m-%dT%H:%M:%SZ", tz = "UTC") + 20 * 60
+              pts <- bind_rows(pts, final %>% mutate(Time = luck_time(end)))
+            }
+          }
+          pts
+        }, error = function(e) NULL)
+
         cat_html(paste0(
           "<p class='sk-meta'>", format(yesterday_ct, "%A, %B %d"), "</p>",
+          luck_chart_html(yesterday_luck, "Yesterday's luck", "Each player's luck at every update, first tip-off to last final."),
           build_cards(yesterday_cards, "sk-yesterday-games", espn_links(yesterday_ct), yesterday_ct),
           "<h2 class='sk-h'>Yesterday by player</h2>",
           build_table(yesterday_summary, list(
@@ -1895,8 +2059,6 @@ hist_json <- vapply(seq_along(chart_dates), function(i) {
          "}}")
 }, character(1))
 # Same player colors as the Standings page
-player_colors <- c(Eristeo = "#3E97D6", Brian = "#E26A54", Adam = "#22A794")
-
 cat_html(paste0(
   "<h2 class='sk-h'>Season charts</h2>",
   "<div class='sk-chart' id='sk-chart'><div class='sk-ctabs'><span class='sk-seg' id='sk-ctabs'>",
