@@ -83,6 +83,7 @@ format:
         .sk-table th:first-child, .sk-table td:first-child { text-align: left; }
         .sk-table th { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--sk-muted); font-weight: 600; border-bottom: 1px solid var(--sk-line); }
         .sk-table tr + tr td { border-top: 1px solid var(--sk-line); }
+        .sk-table tfoot td { font-weight: 700; border-top: 2px solid var(--sk-line); }
         .sk-table tr.me td { background: var(--sk-mine); font-weight: 700; }
         .sk-pill { border-radius: 4px; padding: 1px 6px; }
         .sk-pill.pos { background: var(--sk-good-bg); color: var(--sk-good); }
@@ -1384,7 +1385,12 @@ espn_links <- function(date) {
 # links: from espn_links(); cards fall back to that day's ESPN scoreboard
 build_cards <- function(df, container_id, links = character(), date = Sys.Date()) {
   games <- split(df, df$game_id)
-  games <- games[order(vapply(games, function(g) g$sort_key[1], numeric(1)))]
+  # Finished games: most impactful first = biggest total swing between pregame chance and the actual skin
+  impact <- vapply(games, function(g) {
+    if (g$State[1] != "final") return(0)
+    sum(abs(as.numeric(g$Won_Skin) - g$Expected), na.rm = TRUE)
+  }, numeric(1))
+  games <- games[order(vapply(games, function(g) g$sort_key[1], numeric(1)), -impact)]
   cards <- vapply(games, function(g) {
     state <- g$State[1]
     # Zero-sum: both owners need the same result (W/W or L/L), so exactly one skin is available
@@ -1432,8 +1438,13 @@ build_table <- function(rows, cols, table_id, data_attrs = FALSE) {
     paste0("<tr data-player='", html_esc(r$Player), "'", attrs, "><td>", html_esc(r$Player), "</td>",
            paste0("<td>", cells, "</td>", collapse = ""), "</tr>")
   }, character(1))
+  # Total row: sums of every numeric column, formatted by the same column functions
+  tot <- rows[1, ]
+  for (nm in names(rows)) if (is.numeric(rows[[nm]])) tot[[nm]] <- sum(rows[[nm]], na.rm = TRUE)
+  total_cells <- vapply(cols, function(f) f(tot), character(1))
+  foot <- paste0("<tfoot><tr class='total'><td>Total</td>", paste0("<td>", total_cells, "</td>", collapse = ""), "</tr></tfoot>")
   paste0("<div class='sk-tablewrap'><table class='sk-table' id='", table_id, "' data-quarto-disable-processing='true'>",
-         head, "<tbody>", paste(body, collapse = ""), "</tbody></table></div>")
+         head, "<tbody>", paste(body, collapse = ""), "</tbody>", foot, "</table></div>")
 }
 
 cat_html <- function(x) cat("\n```{=html}\n", x, "\n```\n", sep = "")
