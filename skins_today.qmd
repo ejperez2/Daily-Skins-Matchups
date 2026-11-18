@@ -43,8 +43,12 @@ format:
         .sk-card .chg { font-size: 13px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .sk-card .delta.up { color: var(--sk-good); }
         .sk-card .delta.down { color: var(--sk-bad); }
+        /* Final games only show a check mark in the percent column, so it can be narrow */
+        .sk-card[data-state='final'] .side { grid-template-columns: 50px minmax(0, 1fr) auto 24px 48px; }
         .sk-card .abbr { font-weight: 700; font-size: 20px; }
         .sk-card .owner { font-size: 15px; display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+        .sk-card .owner .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+        .sk-card .owner .pick { flex: none; }
         .sk-card .owner .pick { font-size: 11px; color: var(--sk-muted); border: 1px solid var(--sk-line); border-radius: 4px; padding: 0 4px; }
         .sk-card .side.me .owner { font-weight: 700; }
         .sk-card .side.won .name { background: var(--sk-good-bg); color: var(--sk-good); border-radius: 4px; padding: 0 5px; }
@@ -114,6 +118,17 @@ format:
         .sk-daychart { margin-top: 14px; }
         .sk-daychart[hidden] { display: none; }
         .sk-empty { padding: 36px 8px; text-align: center; color: var(--sk-muted); font-size: 14px; }
+        @media (max-width: 480px) {
+          .sk-card .side, .sk-card[data-state='final'] .side { grid-template-columns: 40px minmax(0, 1fr) auto 20px 44px; gap: 4px 6px; }
+          .sk-card[data-state='upcoming'] .side { grid-template-columns: 40px minmax(0, 1fr) auto 38px; }
+          .sk-card .abbr { font-size: 18px; }
+          .sk-card .owner { font-size: 14px; gap: 4px; }
+          .sk-card .score { font-size: 19px; }
+          .sk-card .pct { font-size: 16px; }
+          .sk-card .chg { font-size: 12px; }
+          .sk-card .side.won .name, .sk-card .side.me.lost .name { padding: 0 3px; }
+        }
+        .sk-ctabs .sk-seg { flex: none; white-space: nowrap; }
         @media (max-width: 768px) { table { font-size: 12px; } th, td { padding: 4px !important; } .sk-table th, .sk-table td { padding: 7px 6px !important; } table.sk-table { font-size: 14px; } #sk-today-summary th, #sk-today-summary td { padding: 7px 4px !important; } }
         </style>
     include-before-body:
@@ -381,7 +396,10 @@ format:
             luck: { ttl: "Cumulative skins luck", dsc: "Skins won minus expected skins. Above zero means luckier than the odds said.",
               key: "luck", zero: true, fmt: function (v) { return (v > 0.05 ? "+" : "") + v.toFixed(1); } },
             exp: { ttl: "Expected skins", dsc: "Running total of pregame expected skins.", key: "exp", fmt: f1 },
-            won: { ttl: "Skins won", dsc: "Running total of skins won.", key: "won", fmt: function (v) { return v.toFixed(0); }, tip: function (v) { return v.toFixed(0); } }
+            won: { ttl: "Skins won", dsc: "Running total of skins won.", key: "won", fmt: function (v) { return v.toFixed(0); }, tip: function (v) { return v.toFixed(0); } },
+            ups: { ttl: "Upsets won", dsc: "Running total of skins won with a pregame chance under 50%.", key: "ups", fmt: function (v) { return v.toFixed(0); } },
+            azw: { ttl: "Adversarial zero-sum games won", dsc: "Running total of zero-sum games against another player (same pick on both sides) where you took the skin.", key: "azw", fmt: function (v) { return v.toFixed(0); } },
+            azp: { ttl: "Adversarial zero-sum win %", dsc: "Share of your adversarial zero-sum games that you won. Starts once you have played one.", key: "azp", fmt: function (v) { return v.toFixed(0) + "%"; } }
           };
           var state = "luck";
 
@@ -406,10 +424,12 @@ format:
 
             var series = PLAYERS.map(function (p) { return { p: p, v: H.map(function (h) { var r = h.r[p]; return r ? r[c.key] : null; }) }; });
             var vals = []; series.forEach(function (s) { s.v.forEach(function (v) { if (v != null) vals.push(v); }); });
+            if (!vals.length) { plot.innerHTML = '<div class="sk-empty">Starts once a game qualifies.</div>'; return; }
             var W = Math.max(280, plot.clientWidth), Hh = Math.round(Math.min(320, Math.max(220, W * 0.58)));
             var m = { l: 44, r: 76, t: 10, b: 24 };
             var y0 = Math.min.apply(null, vals), y1 = Math.max.apply(null, vals);
             if (c.zero) { y0 = Math.min(y0, 0); y1 = Math.max(y1, 0); }
+
             var yt = niceTicks(y0, y1); y0 = Math.min(y0, yt[0]); y1 = Math.max(y1, yt[yt.length - 1]);
             var n = H.length;
             var t = H.map(function (h) { return new Date(h.d + "T12:00:00").getTime(); }), t0 = t[0], t1 = t[n - 1];
@@ -1449,6 +1469,22 @@ build_table <- function(rows, cols, table_id, data_attrs = FALSE) {
 
 cat_html <- function(x) cat("\n```{=html}\n", x, "\n```\n", sep = "")
 
+# Upsets and adversarial zero-sum games (AZSG) from a history table (one row per drafted team, as saved
+# in skins_history). Upset won: a skin won with a pregame chance under 50% (the cards' UPSET badge).
+# AZSG: a game whose two teams belong to different players with the same pick, so exactly one skin is up
+# for grabs between them; the game counts for both owners, and the one who got the skin "won" it.
+add_special_flags <- function(d) {
+  d %>%
+    group_by(game_id) %>%
+    mutate(AZ_Game = n() == 2 & n_distinct(Player) == 2 & n_distinct(Pick) == 1) %>%
+    ungroup() %>%
+    mutate(
+      Upset_Won = !is.na(Actual_Skins) & Actual_Skins == 1 & Expected_Skins < 0.5,
+      AZ_Played = AZ_Game & !is.na(Actual_Skins),
+      AZ_Won = AZ_Played & Actual_Skins == 1
+    )
+}
+
 # --- Daily luck graph ---
 # Every run made while a game is under way (or has finished) adds one point per player to
 # luck_history/<skins date>.csv: Time (UTC), Player, Luck (live expected skins minus pregame expected
@@ -1968,6 +2004,7 @@ if (length(all_files) > 0) {
 
 # Baseline plus every finished game since SEASON_START
 ytd_new_data <- if (nrow(ytd_data) > 0) {
+  ytd_data <- add_special_flags(ytd_data)
   ytd_data %>%
     group_by(Player) %>%
     summarise(
@@ -1975,19 +2012,25 @@ ytd_new_data <- if (nrow(ytd_data) > 0) {
       Total_Expected_Skins = sum(Expected_Skins, na.rm = TRUE),
       Total_Actual_Skins = sum(Actual_Skins, na.rm = TRUE),
       Cumulative_Skins_Luck = sum(Skins_Luck, na.rm = TRUE),
+      Upsets = sum(Upset_Won),
+      AZ_Won = sum(AZ_Won),
+      AZ_G = sum(AZ_Played),
       .groups = 'drop'
     )
 } else {
-  ytd_baseline[0, ]
+  ytd_baseline[0, ] %>% mutate(Upsets = 0L, AZ_Won = 0L, AZ_G = 0L)
 }
 
-ytd_summary <- bind_rows(ytd_baseline, ytd_new_data) %>%
+ytd_summary <- bind_rows(ytd_baseline %>% mutate(Upsets = 0L, AZ_Won = 0L, AZ_G = 0L), ytd_new_data) %>%
   group_by(Player) %>%
   summarise(
     Games = sum(Games),
     Expected = sum(Total_Expected_Skins),
     Won = sum(Total_Actual_Skins),
     Luck = sum(Cumulative_Skins_Luck),
+    Upsets = sum(Upsets),
+    AZ_Won = sum(AZ_Won),
+    AZ_G = sum(AZ_G),
     .groups = 'drop'
   ) %>%
   arrange(desc(Luck))
@@ -1997,9 +2040,12 @@ cat_html(paste0(
     Games = function(r) as.character(r$Games),
     Expected = function(r) sprintf("%.1f", r$Expected),
     Won = function(r) as.character(r$Won),
-    Luck = function(r) luck_pill(r$Luck)
+    Luck = function(r) luck_pill(r$Luck),
+    Upsets = function(r) as.character(r$Upsets),
+    `AZSG W` = function(r) as.character(r$AZ_Won),
+    `AZSG %` = function(r) if (r$AZ_G > 0) paste0(round(100 * r$AZ_Won / r$AZ_G), "%") else "&ndash;"
   ), "sk-season-summary"),
-  "<p class='sk-note'>Finished games only. Luck = skins won minus expected skins.</p>"
+  "<p class='sk-note'>Finished games only. Luck = skins won minus expected skins. Upsets = skins won with a pregame chance under 50%. AZSG = adversarial zero-sum games: two players hold the same pick on both teams, so one skin is split between them; AZSG W = those you took the skin in, AZSG % = AZSG W out of the AZSG you played.</p>"
 ))
 ```
 
@@ -2017,9 +2063,10 @@ baseline_start <- ytd_baseline %>%
     Date = baseline_chart_date,
     Daily_Expected = Total_Expected_Skins,
     Daily_Actual = Total_Actual_Skins,
-    Daily_Luck = Cumulative_Skins_Luck
+    Daily_Luck = Cumulative_Skins_Luck,
+    Daily_Upsets = 0L, Daily_AZ_Won = 0L, Daily_AZ_G = 0L
   ) %>%
-  select(Player, Date, Daily_Expected, Daily_Actual, Daily_Luck)
+  select(Player, Date, Daily_Expected, Daily_Actual, Daily_Luck, Daily_Upsets, Daily_AZ_Won, Daily_AZ_G)
 
 # Get new daily data if available
 if (exists("ytd_data") && nrow(ytd_data) > 0) {
@@ -2029,6 +2076,9 @@ if (exists("ytd_data") && nrow(ytd_data) > 0) {
       Daily_Expected = sum(Expected_Skins, na.rm = TRUE),
       Daily_Actual = sum(Actual_Skins, na.rm = TRUE),
       Daily_Luck = sum(Skins_Luck, na.rm = TRUE),
+      Daily_Upsets = sum(Upset_Won),
+      Daily_AZ_Won = sum(AZ_Won),
+      Daily_AZ_G = sum(AZ_Played),
       .groups = 'drop'
     )
   
@@ -2055,18 +2105,22 @@ if (exists("ytd_data") && nrow(ytd_data) > 0) {
 # Interactive charts (drawn in the browser): one point per player per day, carried forward on days off
 chart_long <- bind_rows(baseline_start, if (nrow(ytd_data) > 0) daily_data_summarized) %>%
   group_by(Player, Date) %>%
-  summarise(across(c(Daily_Expected, Daily_Actual, Daily_Luck), sum), .groups = "drop") %>%
-  complete(Player = PLAYERS, Date, fill = list(Daily_Expected = 0, Daily_Actual = 0, Daily_Luck = 0)) %>%
+  summarise(across(c(Daily_Expected, Daily_Actual, Daily_Luck, Daily_Upsets, Daily_AZ_Won, Daily_AZ_G), sum), .groups = "drop") %>%
+  complete(Player = PLAYERS, Date, fill = list(Daily_Expected = 0, Daily_Actual = 0, Daily_Luck = 0, Daily_Upsets = 0, Daily_AZ_Won = 0, Daily_AZ_G = 0)) %>%
   arrange(Player, Date) %>%
   group_by(Player) %>%
-  mutate(luck = cumsum(Daily_Luck), exp = cumsum(Daily_Expected), won = cumsum(Daily_Actual)) %>%
+  mutate(luck = cumsum(Daily_Luck), exp = cumsum(Daily_Expected), won = cumsum(Daily_Actual),
+         ups = cumsum(Daily_Upsets), azw = cumsum(Daily_AZ_Won), azg = cumsum(Daily_AZ_G),
+         azp = if_else(azg > 0, 100 * azw / azg, NA_real_)) %>%
   ungroup()
 
 chart_dates <- sort(unique(chart_long$Date))
 hist_json <- vapply(seq_along(chart_dates), function(i) {
   rows <- chart_long[chart_long$Date == chart_dates[i], ]
   paste0('{"d":"', format(chart_dates[i]), '","r":{',
-         paste(sprintf('"%s":{"luck":%.3f,"exp":%.3f,"won":%d}', rows$Player, rows$luck, rows$exp, as.integer(rows$won)), collapse = ","),
+         paste(sprintf('"%s":{"luck":%.3f,"exp":%.3f,"won":%d,"ups":%d,"azw":%d,"azp":%s}', rows$Player, rows$luck, rows$exp,
+                       as.integer(rows$won), as.integer(rows$ups), as.integer(rows$azw),
+                       if_else(is.na(rows$azp), "null", sprintf("%.1f", rows$azp))), collapse = ","),
          "}}")
 }, character(1))
 # Same player colors as the Standings page
@@ -2075,7 +2129,10 @@ cat_html(paste0(
   "<div class='sk-chart' id='sk-chart'><div class='sk-ctabs'><span class='sk-seg' id='sk-ctabs'>",
   "<button type='button' data-c='luck' aria-pressed='true'>Luck</button>",
   "<button type='button' data-c='exp'>Expected</button>",
-  "<button type='button' data-c='won'>Won</button></span></div>",
+  "<button type='button' data-c='won'>Won</button>",
+  "<button type='button' data-c='ups'>Upsets</button>",
+  "<button type='button' data-c='azw'>AZSG</button>",
+  "<button type='button' data-c='azp'>AZSG %</button></span></div>",
   "<div class='sk-cttl' id='sk-cttl'></div><p class='sk-cdsc' id='sk-cdsc'></p>",
   "<div class='sk-cleg' id='sk-cleg'></div>",
   "<div class='sk-plot' id='sk-plot'><div class='sk-empty'>Charts need JavaScript.</div></div></div>",
